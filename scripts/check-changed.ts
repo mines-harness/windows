@@ -286,7 +286,7 @@ const steps = [
 // Output is piped, so keep the colors a terminal would get.
 const env = process.stdout.isTTY ? { ...process.env, FORCE_COLOR: "1" } : process.env;
 // Use MINES_CHECK_JOBS=1 when native compilers and audit passes compete for memory.
-const jobs = Number(process.env.MINES_CHECK_JOBS ?? steps.length);
+const jobs = Number(process.env.MINES_CHECK_JOBS ?? Math.max(1, steps.length));
 if (!Number.isInteger(jobs) || jobs < 1) {
   throw new Error("MINES_CHECK_JOBS must be a positive integer.");
 }
