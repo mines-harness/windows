@@ -330,7 +330,7 @@ function ManagedContactsPage() {
           </Button>
           <Button variant="outline" size="sm" render={<Link to="/shared-groups" />}>
             <UsersIcon />
-            Shared groups
+            Workgroups
           </Button>
         </>
       }

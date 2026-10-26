@@ -99,6 +99,10 @@ export function useMinesCatalog() {
   return {
     catalog,
     snapshot,
+    flush: async () => {
+      if (!handle) throw new Error("The library is not ready to save changes.");
+      await handle.flush();
+    },
     accountId,
     error: persistenceError ?? (state.accountId === accountId ? state.error : null),
   };

@@ -44,6 +44,45 @@ interface Placement {
   readonly placementId: string;
 }
 
+interface ArchivedThread {
+  readonly environmentId: string;
+  readonly threadId: string;
+}
+
+interface SectionArchive {
+  readonly sectionId: string;
+  readonly includeContents: boolean;
+  readonly archivedThreads?: readonly ArchivedThread[];
+  readonly entityIds: readonly string[];
+}
+
+function validArchivedThread(value: unknown): value is ArchivedThread {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "environmentId" in value &&
+    typeof value.environmentId === "string" &&
+    "threadId" in value &&
+    typeof value.threadId === "string"
+  );
+}
+
+function validSectionArchive(value: unknown): value is SectionArchive {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "sectionId" in value &&
+    typeof value.sectionId === "string" &&
+    "includeContents" in value &&
+    typeof value.includeContents === "boolean" &&
+    "entityIds" in value &&
+    Array.isArray(value.entityIds) &&
+    value.entityIds.every((id) => typeof id === "string") &&
+    (!("archivedThreads" in value) ||
+      (Array.isArray(value.archivedThreads) && value.archivedThreads.every(validArchivedThread)))
+  );
+}
+
 interface OrderedReference {
   readonly entityId: string;
   readonly placementId: string;
@@ -138,6 +177,8 @@ export class MinesCatalog {
   readonly #placements: Y.Map<Placement>;
   readonly #pins: Y.Map<string | null>;
   readonly #deleted: Y.Map<true>;
+  readonly #sectionArchives: Y.Map<SectionArchive>;
+  readonly #restoredSectionArchives: Y.Map<true>;
   readonly #lifecycle: Y.Map<HostCatalogLifecycle>;
   readonly #contextInstructions: Y.Map<string>;
   readonly #contextSources: Y.Map<StoredContextSource>;
@@ -154,6 +195,8 @@ export class MinesCatalog {
     this.#placements = this.document.getMap("placements");
     this.#pins = this.document.getMap("pin-winners");
     this.#deleted = this.document.getMap("deleted");
+    this.#sectionArchives = this.document.getMap("section-archives");
+    this.#restoredSectionArchives = this.document.getMap("section-archives-restored");
     this.#lifecycle = this.document.getMap("host-lifecycle");
     this.#contextInstructions = this.document.getMap("context-instructions");
     this.#contextSources = this.document.getMap("context-sources");
@@ -173,6 +216,18 @@ export class MinesCatalog {
 
   has(id: string) {
     return this.#entities.has(id) && !this.#deleted.has(id);
+  }
+
+  getEntity(id: string) {
+    const entity = decodeEntity(this.#entities.get(id));
+    return Option.isSome(entity) && entity.value.id === id && !this.#deleted.has(id)
+      ? entity.value
+      : undefined;
+  }
+
+  getParentId(id: string) {
+    const placement = this.#placements.get(id);
+    return validPlacement(placement) ? placement.parentId : null;
   }
 
   transaction(action: () => void) {
@@ -400,7 +455,12 @@ export class MinesCatalog {
     this.document.transact(() => {
       if (parentId === null)
         for (const entry of this.#snapshot.roots)
-          if (entry.orphaned) this.#move(entry.entity.id, null);
+          if (
+            entry.orphaned &&
+            this.getSectionArchiveToken(this.#placements.get(entry.entity.id)?.parentId ?? "")
+              .length === 0
+          )
+            this.#move(entry.entity.id, null);
       this.#move(id, parentId, beforeId);
     }, CATALOG_LOCAL_ORIGIN);
   }
@@ -424,6 +484,118 @@ export class MinesCatalog {
     this.document.transact(() => this.#pins.set(id, null), CATALOG_LOCAL_ORIGIN);
   }
 
+  #descendantIds(id: string) {
+    const children = new Map<string, string[]>();
+    for (const [childId, placement] of this.#placements) {
+      if (!validPlacement(placement) || placement.parentId === null) continue;
+      const siblings = children.get(placement.parentId) ?? [];
+      siblings.push(childId);
+      children.set(placement.parentId, siblings);
+    }
+    const ids = new Set([id]);
+    for (const parentId of ids)
+      for (const childId of children.get(parentId) ?? []) ids.add(childId);
+    return ids;
+  }
+
+  #sectionArchiveEntries(sectionId?: string) {
+    return [...this.#sectionArchives.entries()].filter(
+      (entry) =>
+        !this.#restoredSectionArchives.has(entry[0]) &&
+        validSectionArchive(entry[1]) &&
+        (sectionId === undefined || entry[1].sectionId === sectionId),
+    );
+  }
+
+  getSectionArchiveToken(id: string): readonly string[] {
+    return this.#sectionArchiveEntries(id)
+      .map(([key]) => key)
+      .sort(compareIds);
+  }
+
+  getSectionContents(id: string) {
+    if (this.#requireEntity(id).kind !== "section") throw new Error("Choose a section to archive.");
+    const ids = this.#descendantIds(id);
+    for (const [, archive] of this.#sectionArchiveEntries(id))
+      for (const entityId of archive.entityIds) ids.add(entityId);
+    ids.delete(id);
+    return [...ids]
+      .map((entityId) => this.getEntity(entityId))
+      .filter((entity): entity is MinesCatalogEntity => entity !== undefined);
+  }
+
+  archiveSection(
+    id: string,
+    options: { includeContents: boolean; archivedThreads?: readonly ArchivedThread[] },
+  ) {
+    if (this.#requireEntity(id).kind !== "section") throw new Error("Choose a section to archive.");
+    const entityIds = options.includeContents ? this.#descendantIds(id) : new Set([id]);
+    const operationId = `section-archive:${this.#id()}`;
+    this.document.transact(
+      () =>
+        this.#sectionArchives.set(operationId, {
+          sectionId: id,
+          includeContents: options.includeContents,
+          entityIds: [...entityIds],
+          archivedThreads: options.archivedThreads?.map((thread) => ({ ...thread })) ?? [],
+        }),
+      CATALOG_LOCAL_ORIGIN,
+    );
+    return operationId;
+  }
+
+  getArchivedSectionThreads(id: string): readonly ArchivedThread[] {
+    const threads = new Map<string, ArchivedThread>();
+    for (const [, archive] of this.#sectionArchiveEntries(id))
+      for (const thread of archive.archivedThreads ?? [])
+        threads.set(JSON.stringify([thread.environmentId, thread.threadId]), thread);
+    return [...threads.entries()].sort(([a], [b]) => compareIds(a, b)).map(([, thread]) => thread);
+  }
+
+  restoreSection(id: string, observed: readonly string[] = this.getSectionArchiveToken(id)) {
+    this.document.transact(() => {
+      for (const operationId of observed) {
+        const archive = this.#sectionArchives.get(operationId);
+        if (validSectionArchive(archive) && archive.sectionId === id)
+          this.#restoredSectionArchives.set(operationId, true);
+      }
+    }, CATALOG_LOCAL_ORIGIN);
+  }
+
+  getArchivedSections() {
+    const sectionIds = new Set(
+      this.#sectionArchiveEntries().map(([, archive]) => archive.sectionId),
+    );
+    return [...sectionIds]
+      .map((id) => this.getEntity(id))
+      .filter((entity): entity is MinesCatalogEntity => entity?.kind === "section")
+      .sort((a, b) => compareIds(a.id, b.id));
+  }
+
+  #archivedEntityIds() {
+    const archived = new Set<string>();
+    const withContents = new Set<string>();
+    for (const [, archive] of this.#sectionArchiveEntries()) {
+      archived.add(archive.sectionId);
+      if (archive.includeContents)
+        for (const entityId of archive.entityIds) withContents.add(entityId);
+    }
+    if (withContents.size === 0) return archived;
+    const children = new Map<string, string[]>();
+    for (const [id, placement] of this.#placements) {
+      if (!validPlacement(placement) || placement.parentId === null) continue;
+      const siblings = children.get(placement.parentId) ?? [];
+      siblings.push(id);
+      children.set(placement.parentId, siblings);
+    }
+    // Include children discovered by an offline peer after the archive was created.
+    for (const id of withContents) {
+      archived.add(id);
+      for (const childId of children.get(id) ?? []) withContents.add(childId);
+    }
+    return archived;
+  }
+
   removeContainer(id: string) {
     const entity = this.#requireEntity(id);
     if (entity.kind !== "section" && entity.kind !== "project") {
@@ -437,6 +609,7 @@ export class MinesCatalog {
     for (const value of this.#lifecycle.values())
       if (validLifecycle(value) && (lifecycle.get(value.id)?.sequence ?? -1) < value.sequence)
         lifecycle.set(value.id, value);
+    const archived = this.#archivedEntityIds();
     const entities = new Map<string, MinesCatalogEntity>();
     for (const [id, value] of this.#entities) {
       const entity = decodeEntity(value);
@@ -444,6 +617,7 @@ export class MinesCatalog {
         Option.isSome(entity) &&
         entity.value.id === id &&
         !this.#deleted.has(id) &&
+        !archived.has(id) &&
         lifecycle.get(id)?.state !== "archived" &&
         lifecycle.get(id)?.state !== "deleted"
       )

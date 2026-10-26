@@ -65,8 +65,13 @@ Pin any mine, group, project, section, or device from its menu. Pinned container
 shortcuts to their contents. On desktop, drag an item's grip between rows to reorder
 it, onto a project or section to move it inside, or into **Pinned** to add a shortcut.
 Sections stay at the library's top level. Use **Move to**, **Move up**, and **Move down**
-from the item's menu for keyboard access or on your phone. Removing a section keeps
-its contents in the library.
+from the item's menu for keyboard access or on your phone.
+
+On desktop, choose **Archive** from a section's menu. **Archive section** keeps its
+contents in the library; **Archive all related projects & mines** also archives its
+projects and mines. Restore an archived section from the library menu to recover
+its organization and the contents archived with it. Archiving keeps the underlying
+files and conversations.
 
 Library order and pins belong to your signed-in mines account. You can arrange them
 offline; approved devices merge those changes when a direct connection becomes

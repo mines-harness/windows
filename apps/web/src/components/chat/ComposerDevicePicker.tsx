@@ -39,7 +39,8 @@ export function ComposerDevicePicker({
             size={size}
             disabled={disabled}
             aria-label="Execution device"
-            className="min-w-20 max-w-36 shrink @max-[400px]/composer-surface:max-w-24"
+            data-composer-fixed-control
+            className="min-w-20 max-w-36 shrink-0 @max-[400px]/composer-surface:max-w-24"
           />
         }
       >

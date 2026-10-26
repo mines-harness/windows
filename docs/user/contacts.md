@@ -1,10 +1,12 @@
-# Contacts and shared groups
+# Contacts and Workgroups
 
 Open **Contacts** beside Usage to copy your friend ID, change your name or picture,
 or add someone using their friend ID. Your Mines account is separate from your
 provider accounts.
 
-Use **Shared groups** beside Your library to create a group and invite contacts.
+Use **Workgroups** beside Your library to switch the sidebar to your groups.
+Your pinned items stay available in both your personal library and Workgroups.
+Open a group to chat, create a group, or invite contacts.
 Invitations wait in the invitation inbox until accepted. You can decline an
 invitation, leave a group, or revoke an invitation you sent.
 Groups support up to 32 people and 12 AI mines.

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { AuthAccessReadScope, EnvironmentId, type AuthSessionState } from "@t3tools/contracts";
 import type { PeerDevice } from "@t3tools/contracts/minesPeer";
+import { serverUpdateStateAtom } from "@t3tools/client-runtime/state/server";
 import { createPeerIdentity } from "@t3tools/shared/minesPeerTrust";
 
 type Presentation = { readonly connection: { readonly phase: "connected" | "offline" } };
@@ -116,6 +117,56 @@ describe("environment peer identities", () => {
     expect(f.registry.get(environmentPeerDevicesAtom).get(firstId)).toEqual(device);
     expect(state.requests).not.toHaveBeenCalled();
     f.registry.set(state.presentations, new Map());
+    expect(f.registry.get(environmentPeerDevicesAtom).size).toBe(0);
+  });
+
+  it("retains an SSH identity through an update restart and a fresh authenticated session", () => {
+    using f = fixture();
+    expect(f.registry.get(environmentPeerDevicesAtom).get(firstId)).toEqual(device);
+    f.registry.set(serverUpdateStateAtom(firstId), {
+      status: "running",
+      stage: "resuming",
+      fromVersion: "0.1.8",
+      targetVersion: "0.1.9",
+    });
+    f.registry.set(state.presentations, new Map([[firstId, { connection: { phase: "offline" } }]]));
+    f.registry.set(state.sessions.get(firstId)!, AsyncResult.initial(true));
+    expect(f.registry.get(environmentPeerDevicesAtom).get(firstId)).toEqual(device);
+    f.registry.set(serverUpdateStateAtom(firstId), {
+      status: "failed",
+      stage: "resuming",
+      fromVersion: "0.1.8",
+      targetVersion: "0.1.9",
+      message: "Connection interrupted",
+    });
+    expect(f.registry.get(environmentPeerDevicesAtom).get(firstId)).toEqual(device);
+    f.registry.set(state.sessions.get(firstId)!, AsyncResult.success({ ...granted }));
+    expect(f.registry.get(environmentPeerDevicesAtom).get(firstId)).toEqual(device);
+    f.registry.set(serverUpdateStateAtom(firstId), { status: "idle" });
+    expect(f.registry.get(environmentPeerDevicesAtom).get(firstId)).toEqual(device);
+  });
+
+  it("does not retain an updating device across an account change or revoked access", () => {
+    using f = fixture();
+    expect(f.registry.get(environmentPeerDevicesAtom).get(firstId)).toEqual(device);
+    f.registry.set(serverUpdateStateAtom(firstId), {
+      status: "running",
+      stage: "resuming",
+      fromVersion: "0.1.8",
+      targetVersion: "0.1.9",
+    });
+    f.registry.set(state.presentations, new Map([[firstId, { connection: { phase: "offline" } }]]));
+    f.registry.set(state.account, "account-b");
+    expect(f.registry.get(environmentPeerDevicesAtom).size).toBe(0);
+    f.registry.set(
+      state.presentations,
+      new Map([[firstId, { connection: { phase: "connected" } }]]),
+    );
+    expect(f.registry.get(environmentPeerDevicesAtom).size).toBe(1);
+    f.registry.set(
+      state.sessions.get(firstId)!,
+      AsyncResult.success({ ...granted, scopes: [], permissions: [] }),
+    );
     expect(f.registry.get(environmentPeerDevicesAtom).size).toBe(0);
   });
 

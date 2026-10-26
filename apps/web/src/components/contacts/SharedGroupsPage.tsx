@@ -3,7 +3,7 @@ import { minesAccountEnvironmentIdsAtom } from "@t3tools/client-runtime/catalog"
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId } from "@t3tools/contracts";
 import type { SharedContactGroup } from "@t3tools/contracts/contacts";
-import { Link } from "@tanstack/react-router";
+import { Link, useSearch } from "@tanstack/react-router";
 import { contactGroupMembershipInvitationId } from "@t3tools/shared/minesContacts";
 import {
   ArrowLeftIcon,
@@ -379,7 +379,12 @@ function ManagedSharedGroupsPage() {
     hosts.find((host) => host.environmentId === hostId) ??
     hosts.find((host) => host.environmentId === primary) ??
     hosts[0];
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const search = useSearch({ from: "/shared-groups" });
+  const [selection, setSelection] = useState<{ requested: string | undefined; key: string | null }>(
+    () => ({ requested: search.group, key: search.group ?? null }),
+  );
+  const selectedKey = selection.requested === search.group ? selection.key : (search.group ?? null);
+  const setSelectedKey = (key: string | null) => setSelection({ requested: search.group, key });
   const selected = data?.groups.find((group) => group.key === selectedKey);
   const ownInvitationId =
     selected && data
@@ -387,7 +392,7 @@ function ManagedSharedGroupsPage() {
       : null;
   return (
     <ContactsPageFrame
-      title="Shared groups"
+      title="Workgroups"
       actions={
         <>
           <Popover>
@@ -404,7 +409,7 @@ function ManagedSharedGroupsPage() {
           <Button
             variant="ghost-muted"
             size="icon-sm"
-            aria-label="Refresh shared groups"
+            aria-label="Refresh workgroups"
             disabled={pending || busy || !signedIn}
             onClick={refresh}
           >
@@ -432,16 +437,14 @@ function ManagedSharedGroupsPage() {
       ) : null}
       {pending && !data ? (
         <p role="status" className="text-sm text-muted-foreground">
-          Loading shared groups…
+          Loading workgroups…
         </p>
       ) : null}
       {data ? (
         <>
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-0 flex-1">
-              <h2 className="font-medium">
-                {selected ? selected.groupName : "Your shared groups"}
-              </h2>
+              <h2 className="font-medium">{selected ? selected.groupName : "Your workgroups"}</h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 Messages stay in the group. AI only replies when you ask.
               </p>
@@ -467,7 +470,7 @@ function ManagedSharedGroupsPage() {
                 value={localHost?.environmentId ?? null}
                 onValueChange={(value) => setHostId(value ? EnvironmentId.make(value) : null)}
               >
-                <SelectTrigger aria-label="Your computer for shared groups">
+                <SelectTrigger aria-label="Your computer for workgroups">
                   <SelectValue placeholder="Connect your computer" />
                 </SelectTrigger>
                 <SelectPopup>
@@ -516,7 +519,7 @@ function ManagedSharedGroupsPage() {
                   Connect your computer to create a group or open a shared conversation.
                 </p>
               )}
-              <section aria-label="Shared groups" className="grid gap-3 sm:grid-cols-2">
+              <section aria-label="Workgroups" className="grid gap-3 sm:grid-cols-2">
                 {data.groups.map((group) => (
                   <button
                     key={group.key}
@@ -552,7 +555,7 @@ export function SharedGroupsPage() {
   return hasMinesIdentityConfig() ? (
     <ManagedSharedGroupsPage />
   ) : (
-    <ContactsPageFrame title="Shared groups">
+    <ContactsPageFrame title="Workgroups">
       <p className="text-sm text-muted-foreground">
         Configure the mines account service to share groups with friends.
       </p>

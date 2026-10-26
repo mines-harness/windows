@@ -141,6 +141,205 @@ it("reconciles cloud devices without deleting their history or pin order", () =>
   expect(catalog.getSnapshot().entities.some((entity) => entity.id === cloudId)).toBe(true);
 });
 
+describe("reversible section archive", () => {
+  it("archives only the section and restores its contents, context, and pin order", () => {
+    const catalog = replica("desktop");
+    seed(catalog);
+    catalog.pin("work");
+    catalog.pin("a");
+    catalog.setContextInstructions("work", "Keep the section context");
+    const before = catalog.getSnapshot();
+
+    catalog.archiveSection("work", { includeContents: false });
+
+    expect(catalog.has("work")).toBe(true);
+    expect(catalog.getArchivedSections().map((entity) => entity.id)).toEqual(["work"]);
+    expect(catalog.getSnapshot().roots.map((entry) => entry.entity.id)).toEqual([
+      "personal",
+      "project",
+    ]);
+    expect(catalog.getSnapshot().roots[1]?.children.map((entry) => entry.entity.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(catalog.getSnapshot().pins.map((entry) => entry.entity.id)).toEqual(["a"]);
+
+    catalog.restoreSection("work");
+
+    expect(catalog.getArchivedSections()).toEqual([]);
+    expect(catalog.getSnapshot().roots).toEqual(before.roots);
+    expect(catalog.getSnapshot().pins).toEqual(before.pins);
+    expect(catalog.getSnapshot().contexts).toEqual(before.contexts);
+  });
+
+  it("retains archived descendants and references across discovery, persistence, and repeated restore", () => {
+    const catalog = replica("desktop");
+    seed(catalog);
+    catalog.upsert({ id: "nested", kind: "thread", title: "Subagent" }, { parentId: "a" });
+    catalog.pin("project");
+    catalog.pin("nested");
+    catalog.setContextInstructions("project", "Project context");
+    const before = catalog.getSnapshot();
+
+    catalog.archiveSection("work", { includeContents: true });
+    catalog.upsert({ id: "a", kind: "thread", title: "Build" });
+    const peer = replica("phone");
+    peer.applyUpdate(catalog.encodeUpdate());
+    peer.applyUpdate(catalog.encodeUpdate());
+
+    expect(peer.getSnapshot().entities.map((entity) => entity.id)).toEqual(["personal"]);
+    expect(peer.getSnapshot().pins).toEqual([]);
+    for (const id of ["work", "project", "a", "b", "nested"]) expect(peer.has(id)).toBe(true);
+    peer.restoreSection("work");
+    peer.restoreSection("work");
+    expect(peer.getSnapshot().roots).toEqual(before.roots);
+    expect(peer.getSnapshot().pins).toEqual(before.pins);
+    expect(peer.getSnapshot().contexts).toEqual(before.contexts);
+    sync(catalog, peer);
+    expect(outline(catalog)).toEqual(outline(peer));
+  });
+
+  it("keeps concurrent children archived and leaves unrelated items visible", () => {
+    const desktop = replica("desktop");
+    const phone = replica("phone");
+    seed(desktop);
+    sync(desktop, phone);
+    desktop.archiveSection("work", { includeContents: true });
+    phone.upsert({ id: "new", kind: "thread", title: "Added offline" }, { parentId: "project" });
+    phone.upsert(
+      { id: "outside", kind: "thread", title: "Personal mine" },
+      { parentId: "personal" },
+    );
+    sync(desktop, phone);
+
+    expect(desktop.getSnapshot().entities.map((entity) => entity.id)).toEqual([
+      "outside",
+      "personal",
+    ]);
+    expect(outline(desktop)).toEqual(outline(phone));
+    desktop.restoreSection("work");
+    sync(desktop, phone);
+    expect(
+      desktop.getSnapshot().roots[0]?.children[0]?.children.map((entry) => entry.entity.id),
+    ).toEqual(["a", "b", "new"]);
+  });
+
+  it("retains exactly the host archive references required for restoration", () => {
+    const catalog = replica("desktop");
+    seed(catalog);
+    const archivedThreads = [{ environmentId: "host", threadId: "a" }];
+    expect(catalog.getSectionContents("work").map((entity) => entity.id)).toEqual([
+      "project",
+      "a",
+      "b",
+    ]);
+    catalog.archiveSection("work", { includeContents: true, archivedThreads });
+    const restored = replica("restored");
+    restored.applyUpdate(catalog.encodeUpdate());
+    expect(restored.getArchivedSectionThreads("work")).toEqual(archivedThreads);
+    expect(restored.getSectionContents("work").map((entity) => entity.id)).toEqual([
+      "project",
+      "a",
+      "b",
+    ]);
+    restored.restoreSection("work");
+    expect(restored.getArchivedSectionThreads("work")).toEqual([]);
+  });
+
+  it("preserves untouched child placements when another archived-section child is moved", () => {
+    const catalog = replica("desktop");
+    seed(catalog);
+    catalog.upsert(
+      { id: "second-project", kind: "project", title: "Second" },
+      { parentId: "work" },
+    );
+    catalog.archiveSection("work", { includeContents: false });
+    catalog.move("project", null);
+    catalog.restoreSection("work");
+    expect(catalog.getSnapshot().roots[0]?.children.map((entry) => entry.entity.id)).toEqual([
+      "second-project",
+    ]);
+    expect(catalog.getSnapshot().roots[2]?.entity.id).toBe("project");
+  });
+
+  it("ignores malformed peer archive metadata without breaking content or restore", () => {
+    const catalog = replica("desktop");
+    seed(catalog);
+    const before = outline(catalog);
+    for (const archive of [
+      { sectionId: "work", includeContents: true, entityIds: "work", archivedThreads: {} },
+      { sectionId: "work", includeContents: true, entityIds: ["work"], archivedThreads: {} },
+      { sectionId: "work", includeContents: true, entityIds: [null], archivedThreads: [] },
+      {
+        sectionId: "work",
+        includeContents: true,
+        entityIds: ["work"],
+        archivedThreads: [{ threadId: 1 }],
+      },
+    ]) {
+      catalog.document.getMap("section-archives").set("work", archive);
+      expect(outline(catalog)).toEqual(before);
+      expect(catalog.getArchivedSections()).toEqual([]);
+      expect(catalog.getArchivedSectionThreads("work")).toEqual([]);
+      expect(catalog.getSectionContents("work").map((entity) => entity.id)).toEqual([
+        "project",
+        "a",
+        "b",
+      ]);
+      catalog.restoreSection("work");
+      expect(outline(catalog)).toEqual(before);
+    }
+  });
+
+  it("merges concurrent section archives without losing either host recovery journal", () => {
+    const desktop = replica("desktop");
+    const phone = replica("phone");
+    seed(desktop);
+    sync(desktop, phone);
+    const first = { environmentId: "host-a", threadId: "one" };
+    const second = { environmentId: "host-b", threadId: "two" };
+    desktop.archiveSection("work", { includeContents: true, archivedThreads: [first] });
+    phone.archiveSection("work", { includeContents: true, archivedThreads: [second] });
+    sync(desktop, phone);
+    expect(desktop.getArchivedSectionThreads("work")).toEqual([first, second]);
+    expect(phone.getArchivedSectionThreads("work")).toEqual([first, second]);
+    expect(desktop.getArchivedSections().map((section) => section.id)).toEqual(["work"]);
+  });
+
+  it("restores only observed archive operations when another archive arrives during host recovery", () => {
+    const desktop = replica("desktop");
+    const phone = replica("phone");
+    seed(desktop);
+    sync(desktop, phone);
+    const first = { environmentId: "host-a", threadId: "one" };
+    const second = { environmentId: "host-b", threadId: "two" };
+    desktop.archiveSection("work", { includeContents: true, archivedThreads: [first] });
+    const observed = desktop.getSectionArchiveToken("work");
+    phone.archiveSection("work", { includeContents: true, archivedThreads: [second] });
+    sync(desktop, phone);
+    desktop.restoreSection("work", observed);
+    sync(desktop, phone);
+    expect(desktop.getArchivedSectionThreads("work")).toEqual([second]);
+    expect(desktop.getArchivedSections()).toHaveLength(1);
+    expect(desktop.getSnapshot().pins).toEqual([]);
+    const stale = desktop.encodeUpdate();
+    desktop.restoreSection("work", desktop.getSectionArchiveToken("work"));
+    desktop.applyUpdate(stale);
+    sync(desktop, phone);
+    expect(desktop.getArchivedSections()).toEqual([]);
+    expect(phone.getArchivedSectionThreads("work")).toEqual([]);
+    expect(outline(desktop)).toEqual(outline(phone));
+  });
+
+  it("rejects a non-section without changing the document", () => {
+    const catalog = replica("desktop");
+    seed(catalog);
+    const before = catalog.encodeStateVector();
+    expect(() => catalog.archiveSection("project", { includeContents: true })).toThrow("section");
+    expect(catalog.encodeStateVector()).toEqual(before);
+  });
+});
+
 function outline(catalog: MinesCatalog) {
   const { roots, pins, entities } = catalog.getSnapshot();
   return { roots, pins, entities };

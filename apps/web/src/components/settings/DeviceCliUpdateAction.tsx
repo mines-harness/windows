@@ -13,6 +13,7 @@ import {
   OutdatedServerUpdateAction,
   ServerUpdateAction,
   ServerUpdateProgress,
+  ServerVersionInfo,
 } from "../ServerUpdateAction";
 
 export function DeviceCliUpdateAction({
@@ -23,15 +24,33 @@ export function DeviceCliUpdateAction({
   readonly targetVersion?: string;
 }) {
   const state = useAtomValue(serverEnvironment.updateStateAtom(environment.environmentId));
+  if (state.status === "running") return <ServerUpdateProgress state={state} />;
+  const action = <DeviceVersionAction environment={environment} targetVersion={targetVersion} />;
+  return state.status === "failed" ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <ServerUpdateProgress state={state} />
+      {action}
+    </div>
+  ) : (
+    action
+  );
+}
+
+function DeviceVersionAction({
+  environment,
+  targetVersion,
+}: {
+  readonly environment: EnvironmentPresentation;
+  readonly targetVersion: string;
+}) {
+  const ssh = connectionRoutes(environment.entry).some(
+    (route) => route.target._tag === "SshConnectionTarget",
+  );
   if (
-    !connectionRoutes(environment.entry).some(
-      (route) => route.target._tag === "SshConnectionTarget",
-    )
+    ssh &&
+    environment.entry.serverUpdateRequired &&
+    environment.connection.phase === "unsupported"
   ) {
-    return null;
-  }
-  if (state.status !== "idle") return <ServerUpdateProgress state={state} />;
-  if (environment.entry.serverUpdateRequired && environment.connection.phase === "unsupported") {
     return (
       <OutdatedServerUpdateAction
         environmentId={environment.environmentId}
@@ -39,6 +58,7 @@ export function DeviceCliUpdateAction({
         fromVersion={undefined}
         targetVersion={targetVersion}
         label="Update CLI"
+        appearance="icon"
       />
     );
   }
@@ -49,11 +69,14 @@ export function DeviceCliUpdateAction({
     config === null ||
     installedVersion === undefined ||
     parseSemver(installedVersion) === null ||
-    parseSemver(targetVersion) === null ||
-    compareSemverVersions(installedVersion, targetVersion) >= 0
+    parseSemver(targetVersion) === null
   ) {
     return null;
   }
+  if (compareSemverVersions(installedVersion, targetVersion) >= 0) {
+    return <ServerVersionInfo version={installedVersion} serverLabel={environment.label} />;
+  }
+  if (!ssh) return null;
   const selfUpdate = resolveServerSelfUpdateCapability(config);
   if (selfUpdate === null || selfUpdate === "desktop-managed") {
     return (
@@ -71,6 +94,7 @@ export function DeviceCliUpdateAction({
       targetVersion={targetVersion}
       label="Update CLI"
       size="xs"
+      appearance="icon"
     />
   );
 }

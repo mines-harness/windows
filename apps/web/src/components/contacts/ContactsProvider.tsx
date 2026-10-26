@@ -128,6 +128,6 @@ export function useContactInvitationCount() {
   return value?.data ? incomingContactInvitations(value.data).length : 0;
 }
 
-export function useContactGroups() {
-  return use(ContactsContext)?.data?.groups ?? [];
+export function useContactGroupsSnapshot() {
+  return use(ContactsContext)?.data ?? null;
 }

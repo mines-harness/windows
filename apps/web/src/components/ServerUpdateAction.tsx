@@ -17,8 +17,8 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { CircleArrowUpIcon } from "lucide-react";
-import { type ComponentProps, useRef, useState } from "react";
+import { CircleArrowUpIcon, InfoIcon } from "lucide-react";
+import { type ComponentProps, useId, useRef, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -28,6 +28,7 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { manualServerUpdateCommand } from "~/versionSkew";
 import { Button } from "./ui/button";
+import { Spinner } from "./ui/spinner";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -174,6 +175,43 @@ export function canUpdateServer(
   return sessionGrantsScope(result.value, AuthEnvironmentMaintainScope);
 }
 
+export function ServerVersionInfo({
+  version,
+  serverLabel,
+}: {
+  readonly version: string;
+  readonly serverLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerId = useId();
+  const tooltipId = `${triggerId}-version`;
+  return (
+    <Tooltip open={open} onOpenChange={setOpen} triggerId={triggerId}>
+      <TooltipTrigger
+        id={triggerId}
+        closeOnClick={false}
+        onClick={() => setOpen(true)}
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={`Version information for ${serverLabel}`}
+            aria-describedby={open ? tooltipId : undefined}
+          />
+        }
+      >
+        <InfoIcon className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="top" role="tooltip" id={tooltipId}>
+        <div className="text-success-foreground">L'appareil est à jour</div>
+        <div className="text-muted-foreground">
+          {version.startsWith("v") ? version : `v${version}`}
+        </div>
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 export function ServerUpdateProgress({
   state,
 }: {
@@ -191,10 +229,9 @@ export function ServerUpdateProgress({
     );
   }
   return (
-    <div className="mt-1 flex items-center gap-2 text-xs font-medium text-foreground">
-      <span className="size-1.5 shrink-0 rounded-full bg-foreground" aria-hidden="true" />
-      <span>{serverUpdateStageLabel(state.stage)}</span>
-    </div>
+    <span className="inline-flex size-7 shrink-0 items-center justify-center text-muted-foreground sm:size-6">
+      <Spinner size="sm" aria-label={`Updating device: ${serverUpdateStageLabel(state.stage)}`} />
+    </span>
   );
 }
 
@@ -342,12 +379,14 @@ export function OutdatedServerUpdateAction({
   fromVersion,
   targetVersion,
   label = "Update",
+  appearance = "button",
 }: {
   readonly environmentId: EnvironmentId;
   readonly serverLabel: string;
   readonly fromVersion: string | undefined;
   readonly targetVersion: string;
   readonly label?: string;
+  readonly appearance?: "button" | "icon";
 }) {
   const update = useAtomCommand(updateOutdatedServer, { reportFailure: false });
   const handleUpdate = async () => {
@@ -374,6 +413,25 @@ export function OutdatedServerUpdateAction({
       description: `Reconnected on version ${result.value.targetVersion}.`,
     });
   };
+  if (appearance === "icon") {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              aria-label={`${label} for ${serverLabel}`}
+              onClick={() => void handleUpdate()}
+            />
+          }
+        >
+          <CircleArrowUpIcon className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+    );
+  }
   return (
     <Button size="xs" variant="outline" onClick={() => void handleUpdate()}>
       {label}

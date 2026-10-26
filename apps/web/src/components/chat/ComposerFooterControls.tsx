@@ -111,7 +111,11 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
               />
             }
           >
-            <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
+            <ComposerControlIcon
+              icon={RuntimeModeIcon}
+              size={size}
+              className={props.runtimeMode === "full-access" ? "text-destructive" : undefined}
+            />
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
             {props.runtimeModeOptions.map((option) => {
@@ -126,7 +130,13 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="grid min-w-0 flex-1 gap-0.5">
                       <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                        <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        <OptionIcon
+                          className={
+                            option.mode === "full-access"
+                              ? "size-3.5 shrink-0 text-destructive"
+                              : "size-3.5 shrink-0 text-muted-foreground"
+                          }
+                        />
                         {option.label}
                       </span>
                       <span className="text-muted-foreground text-xs leading-4">
