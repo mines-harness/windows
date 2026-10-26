@@ -21,8 +21,10 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   type ConnectionCatalogEntry,
+  SshConnectionProfile,
 } from "./catalog.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
+import * as ConnectionProfileStore from "./profileStore.ts";
 import {
   credentialMissingError,
   environmentMismatchError,
@@ -34,6 +36,7 @@ import type {
   ConnectionTarget,
   PreparedConnection,
   PrimaryConnectionTarget,
+  SshConnectionTarget,
 } from "./model.ts";
 import {
   ConnectionBlockedError,
@@ -45,6 +48,10 @@ import {
   orchestrationProtocolCompatibilityError,
 } from "./compatibility.ts";
 import { credentialConnectionId } from "./routes.ts";
+import {
+  PullRequestRoutingPermissions,
+  pullRequestRoutingConnectionKey,
+} from "./pullRequestRoutingPermissions.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
 import { layerRemoteHttpClient } from "../rpc/http.ts";
 import { peerFetch } from "@t3tools/shared/minesPeerAdapters";
@@ -72,6 +79,7 @@ export class ConnectionResolver extends Context.Service<
 
 const isBearerProfile = Schema.is(BearerConnectionProfile);
 const isBearerCredential = Schema.is(BearerConnectionCredential);
+const isSshProfile = Schema.is(SshConnectionProfile);
 
 function primarySocketUrl(
   target: PrimaryConnectionTarget,
@@ -225,10 +233,93 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
   });
 });
 
+const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(function* () {
+  const profiles = yield* Effect.serviceOption(ConnectionProfileStore.ConnectionProfileStore);
+  const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+  const ssh = yield* Effect.serviceOption(ClientCapabilities.SshEnvironmentGateway);
+  const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+
+  return Effect.fn("clientRuntime.connection.broker.ssh")(function* (
+    entry: ConnectionCatalogEntry & { readonly target: SshConnectionTarget },
+  ) {
+    const target = entry.target;
+    const profile = yield* Effect.fromOption(entry.profile, () =>
+      profileMissingError(target.connectionId),
+    );
+    if (!isSshProfile(profile)) {
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        detail: `Connection profile ${target.connectionId} is not an SSH connection.`,
+      });
+    }
+    if (profile.connectionId !== target.connectionId) {
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        detail: "The saved SSH profile belongs to a different connection.",
+      });
+    }
+    if (profile.environmentId !== target.environmentId) {
+      return yield* environmentMismatchError({
+        expected: target.environmentId,
+        actual: profile.environmentId,
+      });
+    }
+    if (Option.isNone(ssh)) {
+      return yield* new ConnectionBlockedError({
+        reason: "unsupported",
+        detail: "SSH environments are only available in the desktop app.",
+      });
+    }
+    if (Option.isNone(profiles)) {
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        detail: "Saved SSH connections are not configured.",
+      });
+    }
+    const saved = Option.getOrUndefined(yield* credentials.get(target.connectionId));
+    const savedToken = saved !== undefined && isBearerCredential(saved) ? saved.token : undefined;
+    const prepared = yield* ssh.value.prepare({
+      connectionId: target.connectionId,
+      expectedEnvironmentId: target.environmentId,
+      target: profile.target,
+      ...(savedToken === undefined ? {} : { bearerToken: savedToken }),
+    });
+    if (prepared.bearerToken !== savedToken) {
+      yield* credentials.put(
+        target.connectionId,
+        new BearerConnectionCredential({ token: prepared.bearerToken }),
+      );
+    }
+    const preparedProfile = new SshConnectionProfile({
+      connectionId: profile.connectionId,
+      environmentId: profile.environmentId,
+      label: profile.label,
+      target: prepared.bootstrap.target,
+    });
+    if (
+      pullRequestRoutingConnectionKey(entry) !==
+      pullRequestRoutingConnectionKey({ ...entry, profile: Option.some(preparedProfile) })
+    ) {
+      const permissions = yield* PullRequestRoutingPermissions;
+      yield* permissions.forget(target.environmentId);
+    }
+    yield* profiles.value.put(preparedProfile);
+    const authorized = yield* remote.authorizeBearer({
+      expectedEnvironmentId: target.environmentId,
+      httpBaseUrl: prepared.bootstrap.httpBaseUrl,
+      wsBaseUrl: prepared.bootstrap.wsBaseUrl,
+      bearerToken: prepared.bearerToken,
+      connectionMethod: "ssh",
+    });
+    return { ...authorized, target } satisfies PreparedConnection;
+  });
+});
+
 /** @public */
 export const make = Effect.gen(function* () {
   const primary = yield* makePrimaryBroker();
   const bearer = yield* makeBearerBroker();
+  const ssh = yield* makeSshBroker();
   const httpClient = yield* HttpClient.HttpClient;
 
   const authorize = Effect.fn("clientRuntime.connection.broker.authorize")(function* (
@@ -253,13 +344,7 @@ export const make = Effect.gen(function* () {
             }),
           );
         case "SshConnectionTarget":
-          return Effect.fail(
-            new ConnectionBlockedError({
-              reason: "unsupported",
-              detail:
-                "SSH device connections are disabled. Approve this device and configure a direct peer connection.",
-            }),
-          );
+          return ssh({ ...entry, target });
       }
     })();
     const descriptor = yield* fetchRemoteEnvironmentDescriptor({
