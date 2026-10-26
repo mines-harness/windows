@@ -266,6 +266,138 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 
+  it.effect(
+    "lists PRs from the tracked fork without changing canonical identity or Git config",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "mines-pr-repository-" });
+        yield* git(cwd, ["init"]);
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/work"]);
+        yield* git(cwd, ["remote", "add", "origin", "https://github.com/mines-harness/macos.git"]);
+        yield* git(cwd, ["remote", "add", "upstream", "https://github.com/pingdotgg/t3code.git"]);
+        yield* git(cwd, ["config", "branch.work.remote", "origin"]);
+        yield* git(cwd, ["config", "branch.work.merge", "refs/heads/main"]);
+        const before = (yield* git(cwd, ["config", "--local", "--list"])).stdout;
+        const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+        expect((yield* resolver.resolve(cwd))?.canonicalKey).toBe("github.com/pingdotgg/t3code");
+        expect((yield* resolver.resolve(cwd, { purpose: "pull-requests" }))?.canonicalKey).toBe(
+          "github.com/mines-harness/macos",
+        );
+        expect((yield* resolver.resolve(cwd))?.canonicalKey).toBe("github.com/pingdotgg/t3code");
+        expect((yield* git(cwd, ["config", "--local", "--list"])).stdout).toBe(before);
+      }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
+  it.effect(
+    "follows branch, explicit PR remote and URL changes without waiting for cache expiry",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "mines-pr-remote-changes-",
+        });
+        yield* git(cwd, ["init"]);
+        yield* git(cwd, ["remote", "add", "origin", "https://github.com/mines-harness/macos.git"]);
+        yield* git(cwd, ["remote", "add", "upstream", "https://github.com/pingdotgg/t3code.git"]);
+        yield* git(cwd, ["config", "branch.work.remote", "origin"]);
+        yield* git(cwd, ["config", "branch.contribute.remote", "upstream"]);
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/work"]);
+        const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+        const resolve = () => resolver.resolve(cwd, { purpose: "pull-requests" });
+        expect((yield* resolve())?.canonicalKey).toBe("github.com/mines-harness/macos");
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/contribute"]);
+        expect((yield* resolve())?.canonicalKey).toBe("github.com/pingdotgg/t3code");
+        yield* git(cwd, ["config", "remote.origin.gh-resolved", "base"]);
+        expect((yield* resolve())?.canonicalKey).toBe("github.com/mines-harness/macos");
+        yield* git(cwd, [
+          "remote",
+          "set-url",
+          "origin",
+          "https://github.com/mines-harness/windows.git",
+        ]);
+        expect((yield* resolve())?.canonicalKey).toBe("github.com/mines-harness/windows");
+        yield* git(cwd, ["config", "--unset", "remote.origin.gh-resolved"]);
+        yield* git(cwd, ["config", "remote.upstream.gh-resolved", "base"]);
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/work"]);
+        expect((yield* resolve())?.canonicalKey).toBe("github.com/pingdotgg/t3code");
+      }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
+  it.effect.each([undefined, ".", "local", "missing"])(
+    "keeps upstream PR discovery when tracking %s cannot identify a remote repository",
+    (tracking) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "mines-pr-fallback-" });
+        yield* git(cwd, ["init"]);
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/work"]);
+        yield* git(cwd, ["remote", "add", "origin", "https://github.com/mines-harness/macos.git"]);
+        yield* git(cwd, ["remote", "add", "upstream", "https://github.com/pingdotgg/t3code.git"]);
+        yield* git(cwd, ["remote", "add", "local", "."]);
+        if (tracking !== undefined) yield* git(cwd, ["config", "branch.work.remote", tracking]);
+        const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+        expect((yield* resolver.resolve(cwd, { purpose: "pull-requests" }))?.canonicalKey).toBe(
+          "github.com/pingdotgg/t3code",
+        );
+      }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
+  it.effect.each(["github.com", "github.example.test"])(
+    "honors an explicit upstream PR selector on %s ahead of origin tracking",
+    (host) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "mines-pr-explicit-" });
+        yield* git(cwd, ["init"]);
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/work"]);
+        yield* git(cwd, ["remote", "add", "origin", `https://${host}/mines-harness/macos.git`]);
+        yield* git(cwd, ["remote", "add", "upstream", `git@${host}:pingdotgg/t3code.git`]);
+        yield* git(cwd, ["remote", "add", "other-host", "https://other.test/pingdotgg/t3code.git"]);
+        yield* git(cwd, ["config", "branch.work.remote", "origin"]);
+        yield* git(cwd, ["config", "remote.origin.gh-resolved", "PingDotGG/T3Code"]);
+        const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+        const identity = yield* resolver.resolve(cwd, { purpose: "pull-requests" });
+        expect(identity?.canonicalKey).toBe(`${host}/pingdotgg/t3code`);
+        expect(identity?.locator.remoteName).toBe("upstream");
+        expect(identity?.locator.remoteUrl).toBe(`git@${host}:pingdotgg/t3code.git`);
+      }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
+  it.effect("keeps a direct T3 checkout available to the PR browser", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "mines-pr-direct-" });
+      yield* git(cwd, ["init"]);
+      yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+      yield* git(cwd, ["remote", "add", "origin", "https://github.com/pingdotgg/t3code.git"]);
+      yield* git(cwd, ["config", "branch.main.remote", "origin"]);
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      expect((yield* resolver.resolve(cwd, { purpose: "pull-requests" }))?.canonicalKey).toBe(
+        "github.com/pingdotgg/t3code",
+      );
+    }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
+  it.effect(
+    "retains canonical discovery for an explicit selector absent from configured remotes",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "mines-pr-unlisted-" });
+        yield* git(cwd, ["init"]);
+        yield* git(cwd, ["symbolic-ref", "HEAD", "refs/heads/work"]);
+        yield* git(cwd, ["remote", "add", "origin", "https://github.com/mines-harness/macos.git"]);
+        yield* git(cwd, ["remote", "add", "upstream", "https://github.com/pingdotgg/t3code.git"]);
+        yield* git(cwd, ["config", "branch.work.remote", "origin"]);
+        yield* git(cwd, ["config", "remote.origin.gh-resolved", "unconfigured/repository"]);
+        const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+        expect((yield* resolver.resolve(cwd, { purpose: "pull-requests" }))?.canonicalKey).toBe(
+          "github.com/pingdotgg/t3code",
+        );
+      }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
   it.effect("uses the last remote path segment as the repository name for nested groups", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
