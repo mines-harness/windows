@@ -982,6 +982,17 @@ export const MAC_FILE_EXCLUSIONS = [
   "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
   "!**/node_modules/node-pty/third_party/conpty/**/*",
 ] as const;
+// Runtime loaders select these architecture-named prebuilds, present in both app slices.
+const MAC_UNIVERSAL_PREBUILT_FILES = [
+  "Contents/Resources/app.asar.unpacked/node_modules/@crowecawcaw/xa11y-darwin-{arm64,x64}/xa11y.darwin-{arm64,x64}.node",
+  "Contents/Resources/app.asar.unpacked/node_modules/@ff-labs/fff-bin-darwin-{arm64,x64}/libfff_c.dylib",
+  "Contents/Resources/app.asar.unpacked/node_modules/@napi-rs/{keyring,keyring-darwin-{arm64,x64}}/keyring.darwin-{arm64,x64}.node",
+  "Contents/Resources/app.asar.unpacked/node_modules/@node-datachannel/darwin-{arm64,x64}/node_datachannel.node",
+  "Contents/Resources/app.asar.unpacked/node_modules/@yuuang/ffi-rs-darwin-{arm64,x64}/ffi-rs.darwin-{arm64,x64}.node",
+  "Contents/Resources/app.asar.unpacked/node_modules/node-pty/prebuilds/darwin-{arm64,x64}/{pty.node,spawn-helper}",
+  "Contents/Resources/app.asar.unpacked/node_modules/objc-js/prebuilds/darwin-{arm64,x64}/{node.napi.armv8.node,node.napi.node}",
+  "Contents/Resources/node_modules/@cursor/sdk-darwin-{arm64,x64}/{bin/{cursorsandbox,rg},vendor/{tree-sitter,tree-sitter-bash}/binding.node}",
+] as const;
 // Linux builds node-pty from source; its prebuilds target other platforms.
 export const LINUX_FILE_EXCLUSIONS = [
   ...MAC_FILE_EXCLUSIONS,
@@ -2592,6 +2603,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     const repoRoot = yield* RepoRoot;
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
+      ...(arch === "universal"
+        ? { x64ArchFiles: `{${MAC_UNIVERSAL_PREBUILT_FILES.join(",")}}` }
+        : {}),
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
       extendInfo: {

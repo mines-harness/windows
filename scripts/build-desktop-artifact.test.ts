@@ -489,6 +489,63 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }),
   );
 
+  it.effect(
+    "keeps architecture-tagged prebuilds while still requiring ordinary natives to merge",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* createBuildConfig(
+          "mac",
+          "dmg",
+          "1.2.3",
+          false,
+          false,
+          undefined,
+          undefined,
+          false,
+          "universal",
+        );
+        const rule = (config.mac as { x64ArchFiles?: string }).x64ArchFiles;
+        assert.isString(rule);
+        const resources = "Contents/Resources/";
+        const modules = `${resources}app.asar.unpacked/node_modules/`;
+        for (const architecture of ["arm64", "x64"]) {
+          const prebuilds = [
+            `@crowecawcaw/xa11y-darwin-${architecture}/xa11y.darwin-${architecture}.node`,
+            `@ff-labs/fff-bin-darwin-${architecture}/libfff_c.dylib`,
+            `@napi-rs/keyring/keyring.darwin-${architecture}.node`,
+            `@napi-rs/keyring-darwin-${architecture}/keyring.darwin-${architecture}.node`,
+            `@node-datachannel/darwin-${architecture}/node_datachannel.node`,
+            `@yuuang/ffi-rs-darwin-${architecture}/ffi-rs.darwin-${architecture}.node`,
+            `node-pty/prebuilds/darwin-${architecture}/pty.node`,
+            `node-pty/prebuilds/darwin-${architecture}/spawn-helper`,
+            `objc-js/prebuilds/darwin-${architecture}/${architecture === "arm64" ? "node.napi.armv8.node" : "node.napi.node"}`,
+          ];
+          for (const relative of prebuilds)
+            assert.isTrue(NodePath.matchesGlob(`${modules}${relative}`, rule as string), relative);
+          for (const relative of [
+            "bin/cursorsandbox",
+            "bin/rg",
+            "vendor/tree-sitter/binding.node",
+            "vendor/tree-sitter-bash/binding.node",
+          ])
+            assert.isTrue(
+              NodePath.matchesGlob(
+                `${resources}node_modules/@cursor/sdk-darwin-${architecture}/${relative}`,
+                rule as string,
+              ),
+              relative,
+            );
+        }
+        for (const relative of [
+          "Contents/MacOS/mines (Beta)",
+          "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+          `${modules}node-pty/build/Release/pty.node`,
+          `${modules}unknown/addon.node`,
+        ])
+          assert.isFalse(NodePath.matchesGlob(relative, rule as string), relative);
+      }),
+  );
+
   it.effect("omits update feeds for pull request preview builds", () =>
     Effect.gen(function* () {
       const preview = yield* createBuildConfig(
