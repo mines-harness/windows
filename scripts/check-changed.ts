@@ -285,33 +285,43 @@ const steps = [
 
 // Output is piped, so keep the colors a terminal would get.
 const env = process.stdout.isTTY ? { ...process.env, FORCE_COLOR: "1" } : process.env;
-const results = await Promise.all(
-  steps.map(
-    (step) =>
-      new Promise<{ name: string; ok: boolean; seconds: string }>((resolve) => {
-        const started = performance.now();
-        const finish = (ok: boolean, output?: Buffer) => {
-          const seconds = ((performance.now() - started) / 1000).toFixed(1);
-          console.log(`\n> vp ${step.name}  ${ok ? "pass" : "FAIL"}  ${seconds}s`);
-          if (output) process.stdout.write(output);
-          resolve({ name: step.name, ok, seconds });
-        };
-        // In-process steps print their own output. The patch check is first and
-        // takes about a second, so the commands start right after it.
-        if ("run" in step) return finish(step.run());
-        const output: Array<Buffer> = [];
-        const child = NodeChildProcess.spawn(process.execPath, [vpEntry, ...step.args], {
-          cwd: root,
-          env,
-        });
-        child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
-        child.stderr.on("data", (chunk: Buffer) => output.push(chunk));
-        // A failed spawn emits "error", then "close" with a nonzero code.
-        child.on("error", (error) => output.push(Buffer.from(`${error.message}\n`)));
-        child.on("close", (status) => finish(status === 0, Buffer.concat(output)));
-      }),
-  ),
-);
+// Use MINES_CHECK_JOBS=1 when native compilers and audit passes compete for memory.
+const jobs = Number(process.env.MINES_CHECK_JOBS ?? steps.length);
+if (!Number.isInteger(jobs) || jobs < 1) {
+  throw new Error("MINES_CHECK_JOBS must be a positive integer.");
+}
+const results: Array<{ name: string; ok: boolean; seconds: string }> = [];
+for (let start = 0; start < steps.length; start += jobs) {
+  results.push(
+    ...(await Promise.all(
+      steps.slice(start, start + jobs).map(
+        (step) =>
+          new Promise<{ name: string; ok: boolean; seconds: string }>((resolve) => {
+            const started = performance.now();
+            const finish = (ok: boolean, output?: Buffer) => {
+              const seconds = ((performance.now() - started) / 1000).toFixed(1);
+              console.log(`\n> vp ${step.name}  ${ok ? "pass" : "FAIL"}  ${seconds}s`);
+              if (output) process.stdout.write(output);
+              resolve({ name: step.name, ok, seconds });
+            };
+            // In-process steps print their own output. The patch check is first and
+            // takes about a second, so the commands start right after it.
+            if ("run" in step) return finish(step.run());
+            const output: Array<Buffer> = [];
+            const child = NodeChildProcess.spawn(process.execPath, [vpEntry, ...step.args], {
+              cwd: root,
+              env,
+            });
+            child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
+            child.stderr.on("data", (chunk: Buffer) => output.push(chunk));
+            // A failed spawn emits "error", then "close" with a nonzero code.
+            child.on("error", (error) => output.push(Buffer.from(`${error.message}\n`)));
+            child.on("close", (status) => finish(status === 0, Buffer.concat(output)));
+          }),
+      ),
+    )),
+  );
+}
 
 const summary = ["check:changed summary"];
 for (const result of results) {
