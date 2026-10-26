@@ -673,7 +673,10 @@ export const make = Effect.gen(function* () {
     window.on("unmaximize", scheduleBoundsPersist);
     window.on("close", (event) => {
       runFork(flushBoundsPersist);
-      if (environment.platform === "darwin" && !Ref.getUnsafe(desktopState.quitting)) {
+      if (
+        (environment.platform === "darwin" || environment.platform === "win32") &&
+        !Ref.getUnsafe(desktopState.quitting)
+      ) {
         event.preventDefault();
         window.hide();
       }

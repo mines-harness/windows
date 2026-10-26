@@ -20,6 +20,8 @@ import * as NodePath from "node:path";
 import { decide, readWorkspace } from "../.github/scripts/ci-changes.cjs";
 
 const root = NodePath.resolve(import.meta.dirname, "..");
+// Windows cannot spawn pnpm's .cmd shim without a shell. Use this checkout's CLI directly.
+const vpEntry = NodePath.join(root, "node_modules/vite-plus/bin/vp");
 const CODE = /\.[cm]?[jt]sx?$/;
 
 // quotePath=false keeps non-ASCII paths as real paths instead of quoted escapes.
@@ -56,6 +58,41 @@ if (files.length === 0) {
 }
 console.log(`check:changed: ${files.length} files since ${base.slice(0, 12)}`);
 
+// Listing ignored files with recursive pathspecs makes Git walk pnpm's Windows
+// junction graph. Ask for collapsed ignored directories, then skip dependencies
+// before descending; nested junctions cannot introduce cycles or outside inputs.
+const ignoredCheckInputs = () => {
+  const inputs: Array<string> = [];
+  const visit = (file: string, generated = false) => {
+    const name = NodePath.basename(file);
+    if (name === "node_modules") return;
+    const path = NodePath.join(root, file);
+    const stat = NodeFS.statSync(path, { throwIfNoEntry: false });
+    if (!stat) return;
+    const isGenerated = generated || name === ".generated" || name === ".astro";
+    if (stat.isDirectory()) {
+      for (const entry of NodeFS.readdirSync(path, { withFileTypes: true })) {
+        if (!entry.isSymbolicLink()) visit(NodePath.join(file, entry.name), isGenerated);
+      }
+    } else if (
+      stat.isFile() &&
+      (isGenerated || name.endsWith(".d.ts") || name.startsWith(".env"))
+    ) {
+      inputs.push(file);
+    }
+  };
+  for (const entry of git(
+    "ls-files",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "--directory",
+  )) {
+    visit(entry.replace(/\/$/, ""));
+  }
+  return inputs.sort();
+};
+
 // Ignored generated sources, declarations, env files, and install state affect check results.
 // Include them in the key, but skip large ignored folders that no check reads.
 // Recompute after a passing run so edits made during it are never cached as passing.
@@ -70,18 +107,7 @@ const inputKey = () => {
       { cwd: root, maxBuffer: 1024 * 1024 * 1024 },
     ),
   );
-  const ignored = git(
-    "ls-files",
-    "--others",
-    "--ignored",
-    "--exclude-standard",
-    "--",
-    ":(glob)**/.generated/**",
-    ":(glob)**/.astro/**",
-    ":(glob)**/*.d.ts",
-    ":(glob)**/.env*",
-    ":(exclude,glob)**/node_modules/**",
-  );
+  const ignored = ignoredCheckInputs();
   for (const file of [
     // Raw bytes of changed files too: .gitattributes normalizes line endings in
     // the diff, but the formatter reads the file as it is on disk.
@@ -195,8 +221,8 @@ const checkPatches = (): boolean => {
       if (NodeFS.existsSync(NodePath.join(root, extra))) copy(extra);
     }
     const { status, stdout, stderr, error } = NodeChildProcess.spawnSync(
-      "vp",
-      ["install", "--lockfile-only", "--ignore-scripts"],
+      process.execPath,
+      [vpEntry, "install", "--lockfile-only", "--ignore-scripts"],
       { cwd: temp, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
     );
     if (status === 0) return true;
@@ -274,7 +300,10 @@ const results = await Promise.all(
         // takes about a second, so the commands start right after it.
         if ("run" in step) return finish(step.run());
         const output: Array<Buffer> = [];
-        const child = NodeChildProcess.spawn("vp", step.args, { cwd: root, env });
+        const child = NodeChildProcess.spawn(process.execPath, [vpEntry, ...step.args], {
+          cwd: root,
+          env,
+        });
         child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
         child.stderr.on("data", (chunk: Buffer) => output.push(chunk));
         // A failed spawn emits "error", then "close" with a nonzero code.

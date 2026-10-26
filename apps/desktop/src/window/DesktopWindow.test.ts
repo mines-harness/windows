@@ -198,23 +198,25 @@ const layerElectronTheme = Layer.succeed(ElectronTheme.ElectronTheme, {
   onUpdated: () => Effect.void,
 } satisfies ElectronTheme.ElectronTheme["Service"]);
 
-const layerDesktopEnvironment = DesktopEnvironment.layer(environmentInput).pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      NodeServices.layer,
-      DesktopConfig.layerTest({
-        MINES_PORT: "3773",
-        VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
-      }),
+const layerDesktopEnvironment = (platform: NodeJS.Platform = environmentInput.platform) =>
+  DesktopEnvironment.layer({ ...environmentInput, platform }).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        DesktopConfig.layerTest({
+          MINES_PORT: "3773",
+          VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
+        }),
+      ),
     ),
-  ),
-);
+  );
 
 const desktopWindowBoundsEquivalence = Schema.toEquivalence(
   DesktopAppSettings.DesktopWindowBoundsSchema,
 );
 
 function layerTest(input: {
+  readonly platform?: NodeJS.Platform;
   readonly window: Electron.BrowserWindow;
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
@@ -303,7 +305,7 @@ function layerTest(input: {
           recordMetrics: () => Effect.void,
           shutdown: Effect.void,
         }),
-        layerDesktopEnvironment,
+        layerDesktopEnvironment(input.platform),
         layerDesktopAppSettings,
         layerDesktopClientSettings,
         layerDesktopServerExposure,
@@ -430,7 +432,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
             recordMetrics: () => Effect.void,
             shutdown: Effect.void,
           }),
-          layerDesktopEnvironment,
+          layerDesktopEnvironment(),
           DesktopAppSettings.layerTest(),
           layerDesktopClientSettings,
           layerDesktopServerExposure,
@@ -744,29 +746,33 @@ describe("DesktopWindow", () => {
     }),
   );
 
-  it.effect("keeps the macOS host alive on window close but allows explicit quit", () =>
-    Effect.gen(function* () {
-      const fake = makeFakeBrowserWindow();
-      const createCount = yield* Ref.make(0);
-      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
-      yield* Effect.gen(function* () {
-        const windows = yield* DesktopWindow.DesktopWindow;
-        const state = yield* DesktopState.DesktopState;
-        yield* windows.handleBackendReady(new URL("http://127.0.0.1:3773"));
-        const close = fake.windowListeners.get("close");
-        if (!close) return yield* Effect.die("window close listener was not registered");
-        const preventDefault = vi.fn();
-        close({ preventDefault });
-        assert.equal(preventDefault.mock.calls.length, 1);
-        assert.equal(fake.hide.mock.calls.length, 1);
-        assert.isTrue(Option.isSome(yield* Ref.get(mainWindow)));
+  it.effect.each(["darwin", "win32"] as const)(
+    "keeps the %s host alive on window close but allows explicit quit",
+    (platform) =>
+      Effect.gen(function* () {
+        const fake = makeFakeBrowserWindow();
+        const createCount = yield* Ref.make(0);
+        const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+        yield* Effect.gen(function* () {
+          const windows = yield* DesktopWindow.DesktopWindow;
+          const state = yield* DesktopState.DesktopState;
+          yield* windows.handleBackendReady(new URL("http://127.0.0.1:3773"));
+          const close = fake.windowListeners.get("close");
+          if (!close) return yield* Effect.die("window close listener was not registered");
+          const preventDefault = vi.fn();
+          close({ preventDefault });
+          assert.equal(preventDefault.mock.calls.length, 1);
+          assert.equal(fake.hide.mock.calls.length, 1);
+          assert.isTrue(Option.isSome(yield* Ref.get(mainWindow)));
 
-        yield* Ref.set(state.quitting, true);
-        close({ preventDefault });
-        assert.equal(preventDefault.mock.calls.length, 1);
-        assert.equal(fake.hide.mock.calls.length, 1);
-      }).pipe(Effect.provide(layerTest({ window: fake.window, createCount, mainWindow })));
-    }),
+          yield* Ref.set(state.quitting, true);
+          close({ preventDefault });
+          assert.equal(preventDefault.mock.calls.length, 1);
+          assert.equal(fake.hide.mock.calls.length, 1);
+        }).pipe(
+          Effect.provide(layerTest({ window: fake.window, createCount, mainWindow, platform })),
+        );
+      }),
   );
 
   it.effect("does not open main or splash windows once quitting has started", () =>

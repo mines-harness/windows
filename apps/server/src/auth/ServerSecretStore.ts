@@ -10,6 +10,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
+import * as WindowsSecretCipher from "./WindowsSecretCipher.ts";
 
 const secretStoreErrorContext = {
   resource: Schema.String,
@@ -169,6 +170,7 @@ export const make = Effect.gen(function* () {
   );
 
   const resolveSecretPath = (name: string) => path.join(serverConfig.secretsDir, `${name}.bin`);
+  const cipher = yield* WindowsSecretCipher.make;
 
   const get: ServerSecretStore["Service"]["get"] = (name) =>
     fileSystem.readFile(resolveSecretPath(name)).pipe(
@@ -182,6 +184,24 @@ export const make = Effect.gen(function* () {
                 cause,
               }),
             ),
+      ),
+      Effect.flatMap((bytes: Option.Option<Uint8Array>) =>
+        Option.match(bytes, {
+          onNone: () => Effect.succeedNone,
+          onSome: (bytes) =>
+            cipher === null
+              ? Effect.succeedSome(bytes)
+              : cipher.open(name, bytes).pipe(
+                  Effect.mapError(
+                    (cause) => new SecretStoreSecureError({ resource: `secret ${name}`, cause }),
+                  ),
+                  Effect.flatMap((opened) =>
+                    opened.needsMigration
+                      ? set(name, opened.bytes).pipe(Effect.as(Option.some(opened.bytes)))
+                      : Effect.succeedSome(opened.bytes),
+                  ),
+                ),
+        }),
       ),
       Effect.withSpan("ServerSecretStore.get"),
     );
@@ -199,7 +219,8 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((uuid) => {
         const tempPath = `${secretPath}.${uuid}.tmp`;
         return Effect.gen(function* () {
-          yield* fileSystem.writeFile(tempPath, value);
+          const protectedValue = cipher === null ? value : yield* cipher.seal(name, value);
+          yield* fileSystem.writeFile(tempPath, protectedValue);
           yield* fileSystem.chmod(tempPath, 0o600);
           yield* fileSystem.rename(tempPath, secretPath);
           yield* fileSystem.chmod(secretPath, 0o600);
@@ -238,10 +259,11 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((uuid) => {
         const tempPath = `${secretPath}.${uuid}.tmp`;
         return Effect.gen(function* () {
+          const protectedValue = cipher === null ? value : yield* cipher.seal(name, value);
           yield* Effect.scoped(
             Effect.gen(function* () {
               const file = yield* fileSystem.open(tempPath, { flag: "wx", mode: 0o600 });
-              yield* file.writeAll(value);
+              yield* file.writeAll(protectedValue);
               yield* file.sync;
             }),
           );

@@ -287,7 +287,7 @@ export const make = DesktopLifecycle.of({
         Effect.gen(function* () {
           const app = yield* ElectronApp.ElectronApp;
           const state = yield* DesktopState.DesktopState;
-          if (environment.platform !== "darwin" && !(yield* Ref.get(state.quitting))) {
+          if (environment.platform === "linux" && !(yield* Ref.get(state.quitting))) {
             yield* app.quit;
           }
         }).pipe(Effect.withSpan("desktop.lifecycle.windowAllClosed")),

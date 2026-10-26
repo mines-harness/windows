@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
@@ -8,6 +9,29 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as PlatformError from "effect/PlatformError";
+import * as Path from "effect/Path";
+import { vi } from "vite-plus/test";
+
+const windowsCredentials = vi.hoisted(() => new Map<string, string>());
+vi.mock("@napi-rs/keyring", () => ({
+  Entry: class {
+    readonly service: string;
+    readonly account: string;
+    constructor(service: string, account: string) {
+      this.service = service;
+      this.account = account;
+    }
+    getPassword() {
+      return windowsCredentials.get(`${this.service}/${this.account}`) ?? null;
+    }
+    setPassword(value: string) {
+      windowsCredentials.set(`${this.service}/${this.account}`, value);
+    }
+    deletePassword() {
+      windowsCredentials.delete(`${this.service}/${this.account}`);
+    }
+  },
+}));
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
@@ -118,6 +142,63 @@ const layerConcurrentCreateSecretStore = () =>
   );
 
 it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
+  it.effect(
+    "encrypts Windows credentials on disk and restores them in another store instance",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const value = new TextEncoder().encode("fixture-account-session-credential");
+        const store = yield* ServerSecretStore.make;
+        yield* store.set("account", value);
+        const persisted = yield* fs.readFile(path.join(config.secretsDir, "account.bin"));
+        assert.isFalse(Buffer.from(persisted).includes(Buffer.from(value)));
+        const reopened = yield* ServerSecretStore.make;
+        assert.deepEqual(Option.getOrThrow(yield* reopened.get("account")), value);
+      }).pipe(
+        Effect.provide(layerServerConfig()),
+        Effect.provideService(HostProcess.Platform, "win32"),
+      ),
+  );
+
+  it.effect("upgrades an existing Windows plaintext credential without changing its value", () =>
+    Effect.gen(function* () {
+      const store = yield* ServerSecretStore.make;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const value = new TextEncoder().encode("fixture-legacy-credential");
+      const file = path.join(config.secretsDir, "account.bin");
+      yield* fs.writeFile(file, value);
+      assert.deepEqual(Option.getOrThrow(yield* store.get("account")), value);
+      assert.isFalse(Buffer.from(yield* fs.readFile(file)).includes(Buffer.from(value)));
+    }).pipe(
+      Effect.provide(layerServerConfig()),
+      Effect.provideService(HostProcess.Platform, "win32"),
+    ),
+  );
+
+  it.effect(
+    "rejects a Windows credential copied over another secret without rewriting either file",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* ServerSecretStore.make;
+        const config = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* store.set("first", new TextEncoder().encode("fixture-first"));
+        const bytes = yield* fs.readFile(path.join(config.secretsDir, "first.bin"));
+        const second = path.join(config.secretsDir, "second.bin");
+        yield* fs.writeFile(second, bytes);
+        yield* Effect.flip(store.get("second"));
+        assert.deepEqual(yield* fs.readFile(second), bytes);
+      }).pipe(
+        Effect.provide(layerServerConfig()),
+        Effect.provideService(HostProcess.Platform, "win32"),
+      ),
+  );
+
   it.effect("reuses an existing secret instead of regenerating it", () =>
     Effect.gen(function* () {
       const secretStore = yield* ServerSecretStore.ServerSecretStore;
