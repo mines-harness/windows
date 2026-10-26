@@ -67,12 +67,19 @@ export const loadPeerIdentity = Effect.fn("mobile.peer.loadIdentity")(function* 
           label: (Device.deviceName?.trim() || Device.modelName?.trim() || "My phone").slice(0, 80),
         }
       : yield* decodeIdentity(saved);
+  const currentLabel = (Device.deviceName?.trim() || Device.modelName?.trim() || "My phone").slice(
+    0,
+    80,
+  );
+  const label = record.label === "My phone" ? currentLabel : record.label;
+  const platform =
+    Device.osName === "iOS" ? "ios" : Device.osName === "Android" ? "android" : undefined;
   const identity = yield* Effect.try({
     try: () =>
-      createPeerIdentity(Result.getOrThrow(Base64Url.decode(record.privateKey)), record.label),
+      createPeerIdentity(Result.getOrThrow(Base64Url.decode(record.privateKey)), label, platform),
     catch: () => new PeerError({ code: "invalid-signature" }),
   });
-  yield* storage.setItem(key, yield* encodeIdentity(record));
+  yield* storage.setItem(key, yield* encodeIdentity({ ...record, label }));
   return identity;
 });
 

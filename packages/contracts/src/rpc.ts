@@ -2,6 +2,7 @@ import * as MineTransfer from "./mineTransfer.ts";
 import * as Catalog from "./catalogRpc.ts";
 import * as Peer from "./minesPeer.ts";
 import * as PeerManagement from "./peerManagement.ts";
+import * as DevicePairing from "./minesDevicePairing.ts";
 import * as Cloud from "./executionTargets.ts";
 import * as Groups from "./groupChat.ts";
 import * as SharedGroups from "./sharedGroups.ts";
@@ -524,6 +525,9 @@ export const WS_METHODS = {
   peerGetState: "peer.getState",
   peerStatus: "peer.status",
   peerCheckDevice: "peer.checkDevice",
+  peerPairingRequests: "peer.pairingRequests",
+  peerApprovePairing: "peer.approvePairing",
+  peerDenyPairing: "peer.denyPairing",
   peerApprove: "peer.approve",
   peerRevoke: "peer.revoke",
   peerConfigure: "peer.configure",
@@ -840,6 +844,24 @@ const WsPeerCheckDeviceRpc = Rpc.make(WS_METHODS.peerCheckDevice, {
   payload: PeerManagement.PeerCheckDeviceInput,
   success: PeerManagement.PeerDeviceStatus,
   error: Schema.Union([PeerManagement.PeerManagementError, EnvironmentAuthorizationError]),
+});
+
+const WsPeerPairingRequestsRpc = Rpc.make(WS_METHODS.peerPairingRequests, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(DevicePairing.DevicePairingRequest),
+  error: Schema.Union([DevicePairing.DevicePairingError, EnvironmentAuthorizationError]),
+});
+
+const WsPeerApprovePairingRpc = Rpc.make(WS_METHODS.peerApprovePairing, {
+  payload: DevicePairing.DevicePairingApproveInput,
+  success: DevicePairing.DevicePairingApproval,
+  error: Schema.Union([DevicePairing.DevicePairingError, EnvironmentAuthorizationError]),
+});
+
+const WsPeerDenyPairingRpc = Rpc.make(WS_METHODS.peerDenyPairing, {
+  payload: DevicePairing.DevicePairingCodeInput,
+  success: Schema.Void,
+  error: Schema.Union([DevicePairing.DevicePairingError, EnvironmentAuthorizationError]),
 });
 
 const WsPeerApproveRpc = Rpc.make(WS_METHODS.peerApprove, {
@@ -2291,6 +2313,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsPeerGetStateRpc,
   WsPeerStatusRpc,
   WsPeerCheckDeviceRpc,
+  WsPeerPairingRequestsRpc,
+  WsPeerApprovePairingRpc,
+  WsPeerDenyPairingRpc,
   WsCloudSnapshotRpc,
   WsCloudRefreshRpc,
   WsCloudSubmitRpc,

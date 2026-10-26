@@ -444,18 +444,22 @@ if [ -n "$MINES_NODE_SCRIPT_PATH" ]; then
 fi
 MINES_ARCHIVE_VERSION=@@MINES_ARCHIVE_VERSION@@
 if [ -z "$MINES_ARCHIVE_VERSION" ]; then
-  printf 'No t3 release version was provided for the remote runtime.\\n' >&2
+  printf 'No Mines release version was provided for the remote runtime.\\n' >&2
   exit 1
 fi
 # Self-contained release archive: no Node, npm, or compiler on the remote.
-# Unpacked into the pinned-runtime layout so \`t3 service install\` reuses it.
+# Unpacked into the pinned-runtime layout so \`mines service install\` reuses it.
 MINES_RELEASE_BASE_URL=@@MINES_RELEASE_BASE_URL@@
 export MINES_CLI_RELEASE_BASE_URL="$MINES_RELEASE_BASE_URL"
 MINES_RUNTIME_DIR="$HOME/.mines/runtime/versions/$MINES_ARCHIVE_VERSION"
-t3_runtime_ready() {
-  [ -x "$MINES_RUNTIME_DIR/t3" ] && [ "$(cat "$MINES_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$MINES_ARCHIVE_VERSION" ]
+mines_version_matches() {
+  MINES_REPORTED_VERSION="$("$1" --version 2>/dev/null)" || return 1
+  [ "$MINES_REPORTED_VERSION" = "$MINES_ARCHIVE_VERSION" ] || [ "$MINES_REPORTED_VERSION" = "mines v$MINES_ARCHIVE_VERSION" ]
 }
-if ! t3_runtime_ready; then
+mines_runtime_ready() {
+  [ -x "$MINES_RUNTIME_DIR/mines" ] && [ "$(cat "$MINES_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$MINES_ARCHIVE_VERSION" ] && mines_version_matches "$MINES_RUNTIME_DIR/mines"
+}
+if ! mines_runtime_ready; then
   mkdir -p "$HOME/.mines/runtime/versions"
   MINES_LOCK="$HOME/.mines/runtime/versions/.$MINES_ARCHIVE_VERSION.install.lock"
   # uutils mkdir can report success on EEXIST, so use shell noclobber.
@@ -478,7 +482,7 @@ if ! t3_runtime_ready; then
       fi
     fi
     if [ "$MINES_LOCK_WAITED" -ge @@MINES_ARCHIVE_LOCK_WAIT_SECONDS@@ ]; then
-      printf 'Another t3 %s installation has held %s for too long.\\n' "$MINES_ARCHIVE_VERSION" "$MINES_LOCK" >&2
+      printf 'Another Mines %s installation has held %s for too long.\\n' "$MINES_ARCHIVE_VERSION" "$MINES_LOCK" >&2
       exit 1
     fi
     sleep 1
@@ -486,28 +490,28 @@ if ! t3_runtime_ready; then
   done
   trap 'rm -rf "$MINES_LOCK"' EXIT
 fi
-if ! t3_runtime_ready; then
+if ! mines_runtime_ready; then
   case "$(uname -s)" in
     Darwin) MINES_PLATFORM="darwin" ;;
     Linux) MINES_PLATFORM="linux" ;;
-    *) printf 'Remote host %s has no t3 release archive.\\n' "$(uname -s)" >&2; exit 1 ;;
+    *) printf 'Remote host %s has no Mines release archive.\\n' "$(uname -s)" >&2; exit 1 ;;
   esac
   case "$(uname -m)" in
     arm64 | aarch64) MINES_ARCH="arm64" ;;
     x86_64 | amd64) MINES_ARCH="x64" ;;
-    *) printf 'Remote host %s has no t3 release archive.\\n' "$(uname -m)" >&2; exit 1 ;;
+    *) printf 'Remote host %s has no Mines release archive.\\n' "$(uname -m)" >&2; exit 1 ;;
   esac
   MINES_ARCHIVE="mines-$MINES_ARCHIVE_VERSION-$MINES_PLATFORM-$MINES_ARCH.tar.gz"
   MINES_STAGING="$(mktemp -d "$HOME/.mines/runtime/versions/.staging-XXXXXX")"
   trap 'rm -rf "$MINES_STAGING" "$MINES_LOCK"' EXIT
-  t3_fetch() {
+  mines_fetch() {
     if command -v curl >/dev/null 2>&1; then curl -fsSL --connect-timeout 30 --max-time "$3" "$1" -o "$2"
     elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=1 "$1" -O "$2"
     else printf 'Remote host needs curl or wget to download %s.\\n' "$MINES_ARCHIVE" >&2; exit 1
     fi
   }
-  t3_fetch "$MINES_RELEASE_BASE_URL/v$MINES_ARCHIVE_VERSION/SHA256SUMS" "$MINES_STAGING/SHA256SUMS" @@MINES_ARCHIVE_CHECKSUMS_SECONDS@@
-  t3_fetch "$MINES_RELEASE_BASE_URL/v$MINES_ARCHIVE_VERSION/$MINES_ARCHIVE" "$MINES_STAGING/$MINES_ARCHIVE" @@MINES_ARCHIVE_DOWNLOAD_SECONDS@@
+  mines_fetch "$MINES_RELEASE_BASE_URL/v$MINES_ARCHIVE_VERSION/SHA256SUMS" "$MINES_STAGING/SHA256SUMS" @@MINES_ARCHIVE_CHECKSUMS_SECONDS@@
+  mines_fetch "$MINES_RELEASE_BASE_URL/v$MINES_ARCHIVE_VERSION/$MINES_ARCHIVE" "$MINES_STAGING/$MINES_ARCHIVE" @@MINES_ARCHIVE_DOWNLOAD_SECONDS@@
   MINES_EXPECTED="$(grep " \\*\\{0,1\\}$MINES_ARCHIVE$" "$MINES_STAGING/SHA256SUMS" | cut -d' ' -f1)"
   if command -v sha256sum >/dev/null 2>&1; then
     MINES_ACTUAL="$(sha256sum "$MINES_STAGING/$MINES_ARCHIVE" | cut -d' ' -f1)"
@@ -521,8 +525,8 @@ if ! t3_runtime_ready; then
   rm -f "$MINES_STAGING/$MINES_ARCHIVE" "$MINES_STAGING/SHA256SUMS"
   # Prove the binary runs here (libc, arch) before marking it ready, or every
   # later launch would exec a broken install instead of retrying.
-  if ! "$MINES_STAGING/t3" --version >/dev/null 2>&1; then
-    printf 'The t3 %s executable does not run on this host.\\n' "$MINES_ARCHIVE_VERSION" >&2; exit 1
+  if ! mines_version_matches "$MINES_STAGING/mines"; then
+    printf 'The Mines executable does not report the requested version %s on this host.\\n' "$MINES_ARCHIVE_VERSION" >&2; exit 1
   fi
   printf '%s\\n' "$MINES_ARCHIVE_VERSION" > "$MINES_STAGING/.install-complete"
   rm -rf "$MINES_RUNTIME_DIR"
@@ -532,7 +536,7 @@ if [ -n "\${MINES_LOCK:-}" ]; then
   rm -rf "$MINES_LOCK"
   trap - EXIT
 fi
-exec "$MINES_RUNTIME_DIR/t3" "$@"
+exec "$MINES_RUNTIME_DIR/mines" "$@"
 `;
 
 const REMOTE_LAUNCH_SCRIPT = `set -eu
@@ -544,6 +548,7 @@ DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"
 PORT_FILE="$STATE_DIR/port"
 PID_FILE="$STATE_DIR/pid"
 MANAGED_FILE="$STATE_DIR/managed"
+LAUNCHER_FILE="$STATE_DIR/launcher"
 LOG_FILE="$STATE_DIR/server.log"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"
 RUNNER_NEXT="$STATE_DIR/run-t3.next.$$"
@@ -555,10 +560,6 @@ trap cleanup_runner_next EXIT
 cat >"$RUNNER_NEXT" <<'SH'
 @@MINES_RUNNER_SCRIPT@@
 SH
-RUNNER_CHANGED=0
-if [ ! -f "$RUNNER_FILE" ] || ! cmp -s "$RUNNER_NEXT" "$RUNNER_FILE"; then
-  RUNNER_CHANGED=1
-fi
 mv "$RUNNER_NEXT" "$RUNNER_FILE"
 chmod 700 "$RUNNER_FILE"
 MINES_ARCHIVE_MODE=@@MINES_ARCHIVE_MODE@@
@@ -592,7 +593,7 @@ NODE
 wait_for_pid_exit() {
   PID_TO_WAIT="$1"
   WAIT_COUNT=0
-  while kill -0 "$PID_TO_WAIT" 2>/dev/null && [ "$WAIT_COUNT" -lt 20 ]; do
+  while kill -0 "$PID_TO_WAIT" 2>/dev/null && [ "$WAIT_COUNT" -lt 100 ]; do
     WAIT_COUNT=$((WAIT_COUNT + 1))
     sleep 0.1
   done
@@ -642,25 +643,31 @@ if [ -n "$DEFAULT_RUNTIME_INFO" ]; then
   DEFAULT_RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
   DEFAULT_REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
 fi
-# The managed server runs on the default home, so it writes the default
-# runtime file too. When that file names the PID this launcher recorded as
-# managed, it describes our own server and its real port, not one to adopt.
-if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$REMOTE_MANAGED" = "managed" ] && [ "$DEFAULT_RUNTIME_PID" = "$REMOTE_PID" ]; then
+OWN_RUNTIME=0
+if [ "$REMOTE_MANAGED" = "managed" ] && [ -n "$REMOTE_PID" ]; then
+  if [ "$DEFAULT_RUNTIME_PID" = "$REMOTE_PID" ]; then
+    OWN_RUNTIME=1
+  elif [ "$MINES_ARCHIVE_MODE" = "1" ] && [ "$(cat "$LAUNCHER_FILE" 2>/dev/null || true)" = "$REMOTE_PID" ] && "$RUNNER_FILE" __ssh-helper runtime-owned "$DEFAULT_RUNTIME_FILE" "$REMOTE_PID"; then
+    OWN_RUNTIME=1
+  fi
+fi
+# The runtime PID belongs to the launcher's child after a self-update.
+if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$OWN_RUNTIME" = "1" ]; then
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
   printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
 elif [ -n "$DEFAULT_REMOTE_PORT" ]; then
+  if [ "$REMOTE_MANAGED" = "managed" ] && server_running "$REMOTE_PID"; then
+    printf 'Could not confirm which Mines host owns this home. Retry the connection; the existing host was left running.\\n' >&2
+    exit 1
+  fi
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
   if wait_ready "@@MINES_REUSE_READY_TIMEOUT_MS@@"; then
     ADOPTED_PID="$DEFAULT_RUNTIME_PID"
     if [ "$REMOTE_MANAGED" = "managed" ]; then
-      if [ -n "$REMOTE_PID" ] && kill -0 "$REMOTE_PID" 2>/dev/null; then
-        kill "$REMOTE_PID" 2>/dev/null || true
-        wait_for_pid_exit "$REMOTE_PID"
-      fi
       REMOTE_PID=""
       REMOTE_PORT="$DEFAULT_REMOTE_PORT"
       REMOTE_MANAGED="external"
-      rm -f "$PID_FILE"
+      rm -f "$PID_FILE" "$LAUNCHER_FILE"
       printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
       printf 'external\\n' >"$MANAGED_FILE"
     else
@@ -686,15 +693,8 @@ if [ "$REMOTE_MANAGED" = "external" ]; then
     REMOTE_MANAGED=""
   fi
 elif [ -n "$REMOTE_PID" ] && [ -n "$REMOTE_PORT" ] && server_running "$REMOTE_PID"; then
-  # Reconnect owns the local tunnel, not the lifetime of an already running
-  # server. A changed runner is the update path and still replaces it.
-  if [ "$RUNNER_CHANGED" -eq 1 ]; then
-    kill "$REMOTE_PID" 2>/dev/null || true
-    wait_for_pid_exit "$REMOTE_PID"
-    REMOTE_PID=""
-    REMOTE_PORT=""
-    REMOTE_MANAGED=""
-  elif ! wait_ready "@@MINES_READY_TIMEOUT_MS@@"; then
+  # Explicit self-updates preflight running work; reconnect never restarts it.
+  if ! wait_ready "@@MINES_READY_TIMEOUT_MS@@"; then
     printf 'Remote T3 server is still running but did not become ready. Retry the connection; the server was left running.\\n' >&2
     exit 1
   fi
@@ -713,8 +713,18 @@ if [ -z "$REMOTE_PORT" ]; then
     fi
     exit 1
   fi
-  nohup env MINES_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
+  if [ "$MINES_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper prepare-launcher "$DEFAULT_SERVER_HOME" @@MINES_ARCHIVE_VERSION@@
+    nohup env MINES_NO_BROWSER=1 MINES_HOME="$DEFAULT_SERVER_HOME" MINES_HOST=127.0.0.1 MINES_PORT="$REMOTE_PORT" "$RUNNER_FILE" __service-launcher >>"$LOG_FILE" 2>&1 < /dev/null &
+  else
+    nohup env MINES_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
+  fi
   REMOTE_PID="$!"
+  if [ "$MINES_ARCHIVE_MODE" = "1" ]; then
+    printf '%s\\n' "$REMOTE_PID" >"$LAUNCHER_FILE"
+  else
+    rm -f "$LAUNCHER_FILE"
+  fi
   printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
   printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
   printf 'managed\\n' >"$MANAGED_FILE"
@@ -727,7 +737,7 @@ if [ -z "$REMOTE_PORT" ]; then
     fi
     kill "$REMOTE_PID" 2>/dev/null || true
     wait_for_pid_exit "$REMOTE_PID"
-    rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
+    rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE" "$LAUNCHER_FILE"
     exit 1
   fi
 fi
@@ -752,21 +762,22 @@ STATE_DIR="$HOME/.mines/ssh-launch/@@MINES_STATE_KEY@@"
 PID_FILE="$STATE_DIR/pid"
 PORT_FILE="$STATE_DIR/port"
 MANAGED_FILE="$STATE_DIR/managed"
+LAUNCHER_FILE="$STATE_DIR/launcher"
 REMOTE_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
 REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMOTE_PID" 2>/dev/null; then
   kill "$REMOTE_PID" 2>/dev/null || true
   WAIT_COUNT=0
-  while kill -0 "$REMOTE_PID" 2>/dev/null && [ "$WAIT_COUNT" -lt 20 ]; do
+  while kill -0 "$REMOTE_PID" 2>/dev/null && [ "$WAIT_COUNT" -lt 100 ]; do
     WAIT_COUNT=$((WAIT_COUNT + 1))
     sleep 0.1
   done
   if kill -0 "$REMOTE_PID" 2>/dev/null; then
-    printf 'Remote T3 server with PID %s did not stop within 2 seconds. Its ownership files were kept.\\n' "$REMOTE_PID" >&2
+    printf 'Remote Mines server with PID %s did not stop within 10 seconds. Its ownership files were kept.\\n' "$REMOTE_PID" >&2
     exit 1
   fi
 fi
-rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
+rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE" "$LAUNCHER_FILE"
 printf '{"stopped":true}\\n'
 `;
 
@@ -783,7 +794,7 @@ export class SshInvalidArchiveVersionError extends Schema.TaggedError<SshInvalid
   { archiveVersion: Schema.String },
 ) {
   override get message(): string {
-    return `'${this.archiveVersion}' is not an exact t3 version and cannot name a runtime directory.`;
+    return `'${this.archiveVersion}' is not an exact Mines version and cannot name a runtime directory.`;
   }
 }
 
@@ -798,7 +809,7 @@ export class SshMissingRunnerError extends Schema.TaggedError<SshMissingRunnerEr
   {},
 ) {
   override get message(): string {
-    return "A remote t3 runner needs an archive version or a node script path.";
+    return "A remote Mines runner needs an archive version or a node script path.";
   }
 }
 
@@ -843,6 +854,7 @@ export function buildRemoteNodeEnvScript(input?: RemoteMinesRunnerOptions): stri
 function buildRemoteLaunchScript(input?: RemoteMinesRunnerOptions): string {
   return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
     MINES_ARCHIVE_MODE: isNodeScriptRunner(input) ? "0" : "1",
+    MINES_ARCHIVE_VERSION: shellSingleQuote(input?.archiveVersion?.trim() || ""),
     MINES_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
     MINES_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteMinesRunnerScript(input)),
     MINES_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),

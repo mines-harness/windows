@@ -71,7 +71,11 @@ export function verifyPeerDeviceProof(
   return proof;
 }
 
-export function createPeerIdentity(privateKey: Uint8Array, label: string): PeerIdentity {
+export function createPeerIdentity(
+  privateKey: Uint8Array,
+  label: string,
+  platform?: PeerDevice["platform"],
+): PeerIdentity {
   const publicKey = ed25519.getPublicKey(privateKey);
   return {
     privateKey: privateKey.slice(),
@@ -79,6 +83,7 @@ export function createPeerIdentity(privateKey: Uint8Array, label: string): PeerI
       deviceId: Base64Url.encode(sha256(publicKey)),
       publicKey: Base64Url.encode(publicKey),
       label,
+      ...(platform ? { platform } : {}),
     }),
   };
 }

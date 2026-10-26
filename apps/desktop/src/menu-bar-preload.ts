@@ -320,11 +320,45 @@ window.addEventListener("DOMContentLoaded", () => {
         make(
           "small",
           "",
-          `${device.local ? "This computer · " : ""}${device.connected ? "Connected" : "Offline"}`,
+          [
+            ...(device.local ? ["This computer"] : []),
+            device.status
+              ? {
+                  connected: "Connected",
+                  connecting: "Connecting…",
+                  "not-connected": "Not connected",
+                  disabled: "Disabled",
+                  unavailable: "Connection unavailable",
+                  "needs-approval": "Needs approval",
+                }[device.status]
+              : device.connected
+                ? "Connected"
+                : "Not connected",
+            ...(device.presence && !device.connected
+              ? [
+                  {
+                    online: "Online",
+                    offline: "Offline",
+                    unknown: "Availability unknown",
+                  }[device.presence],
+                ]
+              : []),
+          ].join(" · "),
         ),
       );
       const status = make("span", "device-state");
-      status.style.background = device.connected ? "#b5ed93" : "#686871";
+      status.style.background = device.connected
+        ? "#b5ed93"
+        : device.presence === "online"
+          ? "#8bbcff"
+          : "#686871";
+      status.title = device.connected
+        ? "Connected"
+        : device.presence === "online"
+          ? "Online for discovery"
+          : device.presence === "offline"
+            ? "Offline"
+            : "Availability unknown";
       row.append(make("span", "device-glyph"), info, status);
       list.append(row);
     }

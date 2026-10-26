@@ -13,12 +13,16 @@ device service and STUN server. The repository includes deployment guidance for
 the [device service](../../infra/mines-control/README.md); it does not provide a
 running public service. Local work and LAN pairing remain available without it.
 
-Sign in to the same mines account on both devices. In **Settings → Connections**,
-enable direct access on the host, then approve the other device’s code and
-fingerprint. Copy the host’s resulting pairing link back to the requesting device
-to finish setup. Registration with the account alone does not authorize access to
-your computer. The phone uses its own native mines build and the same configured
-account and device service.
+Sign in to the same mines account on both computers. Open **Settings → Devices**
+to see them together. Turn on **Allow connections** on the computer you want to
+access, then choose **Connect** beside it on your other computer. Approve the
+matching short code on the host; mines finishes setup automatically. You can
+decline a request or revoke a device's access on the same page.
+
+Signing in makes a computer discoverable but does not grant access to it. The
+menu bar shows the same devices and distinguishes availability from an active
+connection. Manual network and pairing options remain under **Advanced**. Mobile
+clients retain their existing device approval and pairing-code flow.
 
 For a command-line host, start the host, then run:
 
@@ -29,6 +33,17 @@ mines account login --no-browser
 Open the displayed link on a device with a browser, sign in, and approve the code.
 The CLI then registers the host with the same account. If the host uses a custom
 data directory, pass the same `--base-dir` to these commands.
+
+When another computer requests access, approve its displayed short code over SSH:
+
+```bash
+mines devices approve ABCD2345
+```
+
+Use `mines devices pending` to review requests and `mines devices deny ABCD2345`
+to decline one. Each code expires shortly and authorizes only the requesting
+device. The requesting computer completes its connection without copying a
+pairing link.
 
 Use `mines account status` to inspect the account and signaling connection, and
 `mines devices list` to see account devices and their last direct checks. Run
@@ -51,7 +66,7 @@ the app in the background; reconnect when it returns to the foreground. Optional
 
 Use direct pairing when the other device can reach the host's network address.
 
-On a desktop host, open **Settings → Connections**, enable **Network access**,
+On a desktop host, open **Settings → Devices → Advanced**, enable **Network access**,
 then create a pairing link using an address the other device can reach. Changing
 network access restarts the desktop app. You can turn it off in the same place.
 
@@ -69,14 +84,14 @@ mines pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
-in the receiving app. Connection settings are under **Settings → Connections**
+in the receiving app. Manual connection settings are under **Settings → Devices → Advanced**
 on web and desktop and **Settings → Environments** on mobile. A loopback address
 such as `127.0.0.1` reaches only the device opening the link.
 
 Pairing authorizes that device for future connections. Use a fresh one-time link
 for each new device; you do not need the original token to reconnect. Links
 created in Settings can only be copied from the client that created them while
-its Connections page stays open. If you leave or reload that page, create
+its Devices page stays open. If you leave or reload that page, create
 another link to share.
 
 ### Reach one machine several ways
@@ -84,7 +99,7 @@ another link to share.
 A machine can have separately configured LAN, private-network, Tailscale, or SSH
 routes. Pairing the same machine over another address adds a route instead of a
 second machine. On web and desktop, open its route list in **Settings →
-Connections** to inspect, reorder, or remove routes. On mobile, open the machine
+Devices → Advanced** to inspect, reorder, or remove routes. On mobile, open the machine
 under **Settings → Environments** and choose **Edit**.
 
 A reachable route can be selected explicitly when a peer connection fails; mines
@@ -101,7 +116,7 @@ sessions can have different grants; grouping machines does not combine access.
 ### Balance new mines across machines
 
 Auto balance is off by default. On web and desktop, enable it in
-**Settings → Connections → Load balancing** to automatically choose a machine for
+**Settings → Devices → Advanced → Load balancing** to automatically choose a machine for
 new mines in projects grouped across connected environments. The section
 appears once two or more machines are switched on.
 Each machine starts at **Normal**. Choose **Prefer** to favor it when it has CPU and
@@ -157,9 +172,9 @@ uses HTTP, so include `https://` when your server uses HTTPS.
 
 ## Desktop-managed SSH
 
-In the desktop app, open **Settings → Connections → Add environment**, choose
-**SSH**, and enter a host or SSH alias such as `user@example.com`. mines starts
-or reuses a server there and opens the port forward for you. Projects, provider
+In the desktop app, open **Settings → Devices → Add device**, enter an SSH host or
+alias such as `user@example.com`, and connect. mines installs or reuses a server
+there and opens the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
 The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
@@ -167,7 +182,8 @@ The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
 Automatic SSH installation requires your distributor’s own mines release source.
 Without one, installation is unavailable; mines does not download the upstream
 server. A configured installation stores its runtime under `~/.mines/runtime`.
-Provider CLIs must be on the `PATH` of a non-interactive login shell there;
+When an update is available, use **Update CLI** beside the SSH computer on the
+Devices page. Provider CLIs must be on the `PATH` of a non-interactive login shell there;
 check with:
 
 ```bash
@@ -182,7 +198,7 @@ Each desktop app keeps one session on the host for its SSH connection and reuses
 it when it reconnects. Revoke sessions you no longer use in **Settings →
 Connections** on the host, or on a headless host with `mines auth session list` and
 `mines auth session revoke <id>`. A desktop that can still sign in over SSH pairs
-again on its next connect.
+again on its next connect. Manual session controls are under **Devices → Advanced**.
 
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).

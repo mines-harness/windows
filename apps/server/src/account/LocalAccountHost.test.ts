@@ -2,7 +2,11 @@
 import * as NodeEvents from "node:events";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { AuthAccessReadScope, AuthAccessWriteScope } from "@t3tools/contracts";
+import {
+  AuthAccessReadScope,
+  AuthAccessWriteScope,
+  AuthStandardClientScopes,
+} from "@t3tools/contracts";
 import type { PeerConnectionState } from "@t3tools/contracts/minesPeer";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -74,6 +78,16 @@ const fixture = (overrides: Partial<Operations> = {}) => {
     status: Effect.succeed({ device, devices: [] }),
     check: (deviceId) =>
       Effect.succeed({ deviceId, status: "not-tested", checkedAt: null, failure: null }),
+    pendingPairings: Effect.succeed([]),
+    approvePairing: (input) =>
+      Effect.sync(() => {
+        calls.push(`approve:${input.code}`);
+        return { code: input.code, requester: device };
+      }),
+    denyPairing: (code) =>
+      Effect.sync(() => {
+        calls.push(`deny:${code}`);
+      }),
     ...overrides,
   };
   return {
@@ -230,6 +244,24 @@ it.effect(
     }).pipe(Effect.provide(layerAdapterTest(requests)));
   },
 );
+
+it.effect("revokes the temporary full grant used only for explicit device approval", () => {
+  const requests: Array<{ readonly url: string; readonly scopes: ReadonlyArray<string> }> = [];
+  return Effect.gen(function* () {
+    yield* writeRuntime("http://127.0.0.1:8448");
+    const host = yield* LocalAccountHost.LocalAccountHost;
+    const auth = yield* EnvironmentAuth.EnvironmentAuth;
+    const result = yield* Effect.result(host.approvePairing("ABCD-EFGH"));
+    assert.isTrue(Result.isFailure(result));
+    assert.deepStrictEqual(requests, [
+      {
+        url: "http://127.0.0.1:8448/api/auth/websocket-ticket/rpc",
+        scopes: [...AuthStandardClientScopes],
+      },
+    ]);
+    assert.deepStrictEqual(yield* auth.listSessions(), []);
+  }).pipe(Effect.provide(layerAdapterTest(requests)));
+});
 
 const decodeFrame = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const encodeFrame = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));

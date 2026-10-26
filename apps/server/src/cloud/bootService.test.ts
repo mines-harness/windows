@@ -653,6 +653,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         `--property=StandardOutput=append:${plan.logPath}`,
         `--property=StandardError=append:${plan.logPath}`,
         "--setenv=MINES_BOOT_SERVICE_UNIT=",
+        "--setenv=MINES_CLI_RELEASE_BASE_URL=https://github.com/mines-harness/cli/releases/download",
         pinnedRuntimePaths(path, baseDir, "1.2.4", "linux").entryPath,
         "service",
         "install",

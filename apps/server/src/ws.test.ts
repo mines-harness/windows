@@ -4,6 +4,7 @@ import type { PeerConnectionState } from "@t3tools/contracts/minesPeer";
 import * as RemoteGroupTransport from "./groupChat/RemoteGroupTransport.ts";
 import * as HostSignalingService from "./peer/HostSignalingService.ts";
 import * as PeerManagement from "./peer/PeerManagement.ts";
+import * as PeerPairing from "./peer/PeerPairing.ts";
 import * as CloudTaskService from "./cloud/CloudTaskService.ts";
 import * as GroupChatService from "./groupChat/GroupChatService.ts";
 import * as SharedGroupService from "./groupChat/SharedGroupService.ts";
@@ -438,6 +439,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(RemoteGroupTransport.RemoteGroupTransport)({}),
   Layer.mock(HostCatalogService.HostCatalogService)({}),
   Layer.mock(PeerManagement.PeerManagement)({}),
+  Layer.mock(PeerPairing.PeerPairing)({}),
   Layer.mock(CloudTaskService.CloudTaskService)({}),
   Layer.mock(GroupChatService.GroupChatService)({}),
   Layer.mock(SharedGroupService.SharedGroupService)({}),

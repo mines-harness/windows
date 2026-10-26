@@ -13,6 +13,8 @@ import * as Schedule from "effect/Schedule";
 import { WebSocketServer } from "ws";
 
 import * as DeviceDirectory from "./DeviceDirectory.ts";
+import * as DevicePairing from "./DevicePairing.ts";
+import { handleDevicePairingRequest } from "./DevicePairingRoutes.ts";
 import * as Signaling from "./Signaling.ts";
 import * as Push from "./Push.ts";
 import * as PushStore from "./PushStore.ts";
@@ -48,6 +50,7 @@ const contacts = Contacts.layer.pipe(Layer.provide(Layer.merge(directory, contac
 const runtime = ManagedRuntime.make(
   Layer.mergeAll(
     Signaling.layer,
+    DevicePairing.layer,
     Push.layer,
     AccountAuth.layer({
       databaseURL: required("DATABASE_URL"),
@@ -201,6 +204,17 @@ const handle = async (request: NodeHttp.IncomingMessage, response: NodeHttp.Serv
       Effect.flatMap(Signaling.Signaling, (service) => service.deviceTicket(proof)),
     );
     json(response, 200, { ticket });
+    return;
+  }
+  if (url.pathname === "/v1/device-pairings") {
+    const body = request.method === "POST" ? await readRequestBody(request, 96 * 1024) : "";
+    const result = await runtime.runPromise(
+      handleDevicePairingRequest({
+        method: request.method ?? "GET",
+        body: body ? JSON.parse(body) : undefined,
+      }),
+    );
+    json(response, result.status, result.value);
     return;
   }
   if (

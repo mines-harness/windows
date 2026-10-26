@@ -12,6 +12,12 @@ const isMainProcessExternal = (id: string) =>
 const shouldLaunchElectronAfterPack = process.env.MINES_DESKTOP_DEV === "1";
 const publicConfigDefine = {
   __MINES_BUILD_HOSTED_APP_URL__: JSON.stringify(repoEnv.MINES_HOSTED_APP_URL?.trim() ?? ""),
+  __MINES_BUILD_CLI_RELEASE_BASE_URL__: JSON.stringify(
+    repoEnv.MINES_CLI_RELEASE_BASE_URL?.trim() ?? "",
+  ),
+  __MINES_BUILD_CLI_UPDATE_REPOSITORY__: JSON.stringify(
+    repoEnv.MINES_CLI_UPDATE_REPOSITORY?.trim() ?? "",
+  ),
 };
 
 export default defineConfig({

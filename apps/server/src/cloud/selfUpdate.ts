@@ -9,12 +9,10 @@ import {
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cause from "effect/Cause";
-import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
-import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -22,12 +20,6 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/http";
-
-import {
-  CLI_RELEASE_BASE_URL_ENV,
-  CLI_RELEASE_REPOSITORY_ENV,
-  resolveCliReleaseBaseUrl,
-} from "@t3tools/shared/cliRelease";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -42,6 +34,7 @@ import {
   prunePinnedRuntimes,
 } from "./pinnedRuntime.ts";
 import { decodeServicePreflightResult } from "./servicePreflight.ts";
+import { cliReleaseSourceConfig } from "./cliReleaseSource.ts";
 import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
 import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
@@ -219,10 +212,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
   const httpClient = yield* HttpClient.HttpClient;
-  const releaseBaseUrl = resolveCliReleaseBaseUrl(
-    Option.getOrUndefined(yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option)),
-    Option.getOrUndefined(yield* Config.String(CLI_RELEASE_REPOSITORY_ENV).pipe(Config.option)),
-  );
+  const { releaseBaseUrl } = yield* cliReleaseSourceConfig();
   const inFlight = yield* Ref.make(false);
 
   yield* pruneRuntimesOnStart({ baseDir: serverConfig.baseDir, managed: launcher.managed }).pipe(

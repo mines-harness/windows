@@ -32,6 +32,7 @@ export function ComposerInlineControl(props: {
   readonly icon?: ComponentProps<typeof SymbolView>["name"];
   readonly renderIcon?: (size: number) => ReactNode;
   readonly label: string;
+  readonly detail?: string;
   readonly suffix?: ReactNode;
   /** Show only the icon and chevron; the label still names the control for accessibility. */
   readonly iconOnly?: boolean;
@@ -84,7 +85,7 @@ export function ComposerInlineControl(props: {
         ) : null}
         {props.iconOnly ? null : (
           <Animated.View
-            className="shrink"
+            className="min-w-0 shrink"
             entering={animatesLabel ? INLINE_CONTROL_LABEL_ENTERING : undefined}
           >
             <Text
@@ -93,11 +94,20 @@ export function ComposerInlineControl(props: {
                   ? "text-base font-mines-medium"
                   : "text-sm font-mines-medium",
                 props.emphasized || props.selected ? "text-foreground" : "text-foreground-muted",
+                props.detail && "text-right leading-none",
               )}
               numberOfLines={1}
             >
               {props.label}
             </Text>
+            {props.detail ? (
+              <Text
+                className="text-right text-2xs leading-none text-foreground-muted"
+                numberOfLines={1}
+              >
+                {props.detail}
+              </Text>
+            ) : null}
           </Animated.View>
         )}
         {!props.iconOnly && props.suffix ? (

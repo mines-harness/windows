@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as PeerTrustStore from "./PeerTrustStore.ts";
 import * as PeerHost from "./PeerHost.ts";
 import * as HostSignalingService from "./HostSignalingService.ts";
+import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 export class PeerManagement extends Context.Service<
   PeerManagement,
   {
@@ -36,6 +37,7 @@ const make = Effect.gen(function* () {
   const trust = yield* PeerTrustStore.PeerTrustStore;
   const host = yield* PeerHost.PeerHost;
   const signaling = yield* HostSignalingService.HostSignalingService;
+  const auth = yield* EnvironmentAuth.EnvironmentAuth;
   const connected = new Set<PeerSession>();
   const checked = new Map<string, { result: PeerDeviceStatus; at: number; publicKey: string }>();
   let statusIdentity: string | undefined;
@@ -170,6 +172,14 @@ const make = Effect.gen(function* () {
         );
       yield* host.disconnectDevice(input.deviceId);
       yield* signaling.disconnectDevice(input.deviceId);
+      yield* auth.revokeDevicePairingAccess(input.deviceId).pipe(
+        Effect.mapError(
+          () =>
+            new PeerManagementError({
+              message: "The device's access tokens could not be revoked.",
+            }),
+        ),
+      );
       return yield* state;
     }),
   });

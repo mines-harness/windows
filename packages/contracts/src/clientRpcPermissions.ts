@@ -39,6 +39,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.peerApprove]: AuthAccessWriteScope,
   [WS_METHODS.peerRevoke]: AuthAccessWriteScope,
   [WS_METHODS.peerCheckDevice]: AuthAccessWriteScope,
+  [WS_METHODS.peerApprovePairing]: AuthAccessWriteScope,
+  [WS_METHODS.peerDenyPairing]: AuthAccessWriteScope,
   [WS_METHODS.cloudSubmit]: AuthOrchestrationOperateScope,
   [WS_METHODS.cloudLink]: AuthOrchestrationOperateScope,
   [WS_METHODS.cloudFollowUp]: AuthOrchestrationOperateScope,

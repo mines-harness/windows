@@ -10,6 +10,15 @@ import * as Effect from "effect/Effect";
 import type * as AtomRegistry from "effect/reactivity/AtomRegistry";
 import { connectionAtomRuntime } from "./runtime";
 import {
+  beginBrowserDevicePairing,
+  cancelBrowserDevicePairing,
+  collectBrowserDevicePairing,
+  selectDevicePairingAccount,
+  type BeginPeerPairingInput,
+  type CancelPeerPairingInput,
+  type CollectPeerPairingInput,
+} from "./devicePairing";
+import {
   browserPeerApproval,
   forgetBrowserPeer,
   listBrowserPeerRoutes,
@@ -32,7 +41,49 @@ export const peerClientRoutes = createRuntimeCommand(connectionAtomRuntime, {
 export const restorePeerClient = createRuntimeCommand(connectionAtomRuntime, {
   ...common,
   label: "web:peer:restore",
-  execute: restoreBrowserPeers,
+  execute: Effect.fn("web.peer.restoreCommand")(function* (accountId: string | null) {
+    yield* selectDevicePairingAccount(accountId);
+    return yield* restoreBrowserPeers(accountId);
+  }),
+});
+export const beginPeerPairing = createRuntimeCommand(connectionAtomRuntime, {
+  ...common,
+  label: "web:peer:pairing:begin",
+  execute: Effect.fn("web.peer.beginPairingCommand")(function* (
+    input: BeginPeerPairingInput,
+    registry: AtomRegistry.AtomRegistry,
+  ) {
+    yield* selectDevicePairingAccount(registry.get(minesAccountIdAtom));
+    return yield* beginBrowserDevicePairing(
+      input,
+      () => registry.get(minesAccountIdAtom) === input.accountId,
+    );
+  }),
+});
+export const collectPeerPairing = createRuntimeCommand(connectionAtomRuntime, {
+  ...common,
+  label: "web:peer:pairing:collect",
+  execute: Effect.fn("web.peer.collectPairingCommand")(function* (
+    input: CollectPeerPairingInput,
+    registry: AtomRegistry.AtomRegistry,
+  ) {
+    const result = yield* collectBrowserDevicePairing(
+      input,
+      () => registry.get(minesAccountIdAtom) === input.accountId,
+    );
+    if (result.status === "connected" && registry.get(minesAccountIdAtom) === input.accountId)
+      registry.set(
+        minesAccountEnvironmentIdsAtom,
+        new Set([...registry.get(minesAccountEnvironmentIdsAtom), result.environmentId]),
+      );
+    return result;
+  }),
+});
+export const cancelPeerPairing = createRuntimeCommand(connectionAtomRuntime, {
+  scheduler,
+  concurrency: { mode: "parallel" },
+  label: "web:peer:pairing:cancel",
+  execute: (input: CancelPeerPairingInput) => cancelBrowserDevicePairing(input),
 });
 export const pairPeerClient = createRuntimeCommand(connectionAtomRuntime, {
   ...common,

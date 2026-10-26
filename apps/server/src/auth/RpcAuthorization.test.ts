@@ -43,6 +43,11 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.peerStatus)).toBe(AuthAccessReadScope);
     expect(requiredScopeForRpcMethod(WS_METHODS.peerCheckDevice)).toBe(AuthAccessWriteScope);
   });
+  it("keeps pending pairing requests read-only and protects their decisions", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.peerPairingRequests)).toBe(AuthAccessReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.peerApprovePairing)).toBe(AuthAccessWriteScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.peerDenyPairing)).toBe(AuthAccessWriteScope);
+  });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });

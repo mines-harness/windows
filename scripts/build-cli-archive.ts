@@ -257,17 +257,37 @@ const removeNestedBinDirectories = Effect.fn("build-cli-archive.removeNestedBinD
   },
 );
 
-const stageWebClient = Effect.fn("stageWebClient")(function* (source: string, target: string) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  yield* fs.copy(source, target);
-  const maps = (yield* fs.readDirectory(target, { recursive: true })).filter((entry) =>
-    entry.endsWith(".map"),
-  );
-  for (const entry of maps) {
-    yield* fs.remove(path.join(target, entry), { force: true });
-  }
-});
+export const finalizeCliArchiveContents = Effect.fn("build-cli-archive.finalizeContents")(
+  function* (repoRoot: string, contentDir: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.copyFile(path.join(repoRoot, "LICENSE"), path.join(contentDir, "LICENSE"));
+    yield* fs.copyFile(
+      path.join(repoRoot, "scripts/resources", `node-v${rootPackageJson.engines.node}-LICENSE`),
+      path.join(contentDir, "NODE_LICENSE"),
+    );
+    yield* fs.writeFileString(
+      path.join(contentDir, "THIRD_PARTY_NOTICES.md"),
+      [
+        "# Third-party notices",
+        "",
+        "Mines is based on T3 Code by T3 Tools Inc. The included LICENSE preserves the original MIT license.",
+        "Upstream: https://github.com/pingdotgg/t3code",
+        "",
+        "This archive includes the Node.js runtime and third-party software. Each component retains its own license.",
+        "Client notices are in client/third-party-licenses.json. Dependency license and notice files remain in node_modules.",
+        `Node.js ${rootPackageJson.engines.node} and its bundled third-party notices are reproduced in NODE_LICENSE.`,
+        `Source: https://github.com/nodejs/node/blob/v${rootPackageJson.engines.node}/LICENSE`,
+        "",
+      ].join("\n"),
+    );
+    for (const entry of yield* fs.readDirectory(contentDir, { recursive: true })) {
+      if (entry.endsWith(".map")) {
+        yield* fs.remove(path.join(contentDir, entry), { force: true });
+      }
+    }
+  },
+);
 
 const MacSigningConfig = Config.all({
   identity: Config.String("MINES_CLI_MAC_SIGN_IDENTITY").pipe(Config.option),
@@ -481,7 +501,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
 
   yield* Effect.log(`[cli-archive] Staging ${stem}...`);
   yield* fs.copyFile(builtExecutable, path.join(contentDir, executableName));
-  yield* stageWebClient(webClient, path.join(contentDir, "client"));
+  yield* fs.copy(webClient, path.join(contentDir, "client"));
   if (!input.withoutResourceMonitor) {
     yield* fs.copy(resourceMonitorDir, path.join(contentDir, "resource-monitor"));
   }
@@ -499,6 +519,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     arch: input.arch,
     version: input.version,
   });
+  yield* finalizeCliArchiveContents(repoRoot, contentDir);
 
   const executablePath = path.join(contentDir, executableName);
   if (input.platform === "mac") {

@@ -1010,6 +1010,17 @@ export const DesktopMenuBarState = Schema.Struct({
         name: Schema.String.check(Schema.isMaxLength(100)),
         connected: Schema.Boolean,
         local: Schema.Boolean,
+        status: Schema.optionalKey(
+          Schema.Literals([
+            "connected",
+            "connecting",
+            "not-connected",
+            "disabled",
+            "unavailable",
+            "needs-approval",
+          ]),
+        ),
+        presence: Schema.optionalKey(Schema.Literals(["online", "offline", "unknown"])),
       }),
     ).check(Schema.isMaxLength(100)),
   ),

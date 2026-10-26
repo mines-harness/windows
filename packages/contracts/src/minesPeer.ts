@@ -4,10 +4,14 @@ import * as Effect from "effect/Effect";
 const Identifier = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{16,128}$/));
 const PublicKey = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9_-]{43}$/));
 
+export const PeerDevicePlatform = Schema.Literals(["macos", "windows", "linux", "ios", "android"]);
+export type PeerDevicePlatform = typeof PeerDevicePlatform.Type;
+
 export const PeerDevice = Schema.Struct({
   deviceId: Identifier,
   publicKey: PublicKey,
   label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
+  platform: Schema.optionalKey(PeerDevicePlatform),
 });
 export type PeerDevice = typeof PeerDevice.Type;
 

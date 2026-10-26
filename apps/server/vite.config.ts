@@ -111,6 +111,12 @@ export default mergeConfig(
         __MINES_TELEMETRY_CHANNEL__: JSON.stringify(telemetryChannel),
         __MINES_BUILD_RELAY_URL__: JSON.stringify(repoEnv.MINES_RELAY_URL?.trim() ?? ""),
         __MINES_BUILD_CONTROL_URL__: JSON.stringify(repoEnv.MINES_CONTROL_URL?.trim() ?? ""),
+        __MINES_BUILD_CLI_RELEASE_BASE_URL__: JSON.stringify(
+          repoEnv.MINES_CLI_RELEASE_BASE_URL?.trim() ?? "",
+        ),
+        __MINES_BUILD_CLI_UPDATE_REPOSITORY__: JSON.stringify(
+          repoEnv.MINES_CLI_UPDATE_REPOSITORY?.trim() ?? "",
+        ),
         __MINES_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
           repoEnv.MINES_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
         ),

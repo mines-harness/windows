@@ -12,13 +12,10 @@ import * as Path from "effect/Path";
 import { HttpClient } from "effect/http";
 import * as Schema from "effect/Schema";
 
-import {
-  CLI_RELEASE_BASE_URL_ENV,
-  CLI_RELEASE_REPOSITORY_ENV,
-  resolveCliReleaseBaseUrl,
-} from "@t3tools/shared/cliRelease";
+import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { cliReleaseSourceConfig } from "./cliReleaseSource.ts";
 import {
   ensurePinnedRuntimeInstalled,
   pinnedRuntimeCommand,
@@ -538,10 +535,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const arch = yield* HostProcess.Architecture;
   const uid = yield* HostProcess.UserId;
   const httpClient = yield* HttpClient.HttpClient;
-  const releaseBaseUrl = resolveCliReleaseBaseUrl(
-    Option.getOrUndefined(yield* Config.String(CLI_RELEASE_BASE_URL_ENV).pipe(Config.option)),
-    Option.getOrUndefined(yield* Config.String(CLI_RELEASE_REPOSITORY_ENV).pipe(Config.option)),
-  );
+  const { releaseBaseUrl } = yield* cliReleaseSourceConfig();
   const homeDir = yield* Config.String("HOME").pipe(Config.withDefault(""));
   const installerPath = yield* Config.String("PATH").pipe(Config.withDefault(""));
   const runningInsideService =

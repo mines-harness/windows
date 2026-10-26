@@ -2,16 +2,24 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
+  AuthStandardClientScopes,
   AuthWebSocketTicketResult,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
   type PeerDeviceStatus,
   type PeerState,
   type PeerStatus,
+  type AuthEnvironmentScope,
+  type AuthGrantScope,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
 import type { PeerConfigure, PeerConnectionState } from "@t3tools/contracts/minesPeer";
+import {
+  DevicePairingError,
+  type DevicePairingApproval,
+  type DevicePairingRequest,
+} from "@t3tools/contracts/minesDevicePairing";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -32,6 +40,8 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 
+const isDevicePairingError = Schema.is(DevicePairingError);
+
 export class LocalAccountHostError extends Schema.TaggedError<LocalAccountHostError>()(
   "LocalAccountHostError",
   {
@@ -45,6 +55,7 @@ export class LocalAccountHostError extends Schema.TaggedError<LocalAccountHostEr
     cause: Schema.optionalKey(Schema.Defect()),
     phase: Schema.optionalKey(Schema.Literals(["session", "ticket", "rpc"])),
     status: Schema.optionalKey(Schema.Int),
+    pairingFailure: Schema.optionalKey(DevicePairingError.fields.code),
   },
 ) {
   override get message(): string {
@@ -54,6 +65,8 @@ export class LocalAccountHostError extends Schema.TaggedError<LocalAccountHostEr
       case "unsafe-origin":
         return "The local Mines host must accept a direct loopback connection.";
       case "unavailable":
+        if (this.pairingFailure)
+          return new DevicePairingError({ code: this.pairingFailure }).message;
         if (this.phase === "session")
           return "The CLI could not create a local host session. Check the host's --base-dir; your saved account has been kept.";
         if (this.phase === "ticket")
@@ -81,6 +94,15 @@ interface HostOperations {
   readonly deviceState: Effect.Effect<typeof PeerState.Type, LocalAccountHostError>;
   readonly status: Effect.Effect<PeerStatus, LocalAccountHostError>;
   readonly check: (deviceId: string) => Effect.Effect<PeerDeviceStatus, LocalAccountHostError>;
+  readonly pendingPairings: Effect.Effect<
+    ReadonlyArray<DevicePairingRequest>,
+    LocalAccountHostError
+  >;
+  readonly approvePairing: (input: {
+    readonly code: string;
+    readonly scopes: ReadonlyArray<AuthGrantScope>;
+  }) => Effect.Effect<DevicePairingApproval, LocalAccountHostError>;
+  readonly denyPairing: (code: string) => Effect.Effect<void, LocalAccountHostError>;
 }
 
 export class LocalAccountConnection extends Context.Service<
@@ -88,6 +110,7 @@ export class LocalAccountConnection extends Context.Service<
   {
     readonly use: <A, E>(
       run: (operations: HostOperations) => Effect.Effect<A, E>,
+      options?: { readonly scopes: ReadonlyArray<AuthEnvironmentScope> },
     ) => Effect.Effect<A, E | LocalAccountHostError>;
   }
 >()("mines/account/LocalAccountHost/LocalAccountConnection") {}
@@ -105,6 +128,14 @@ export class LocalAccountHost extends Context.Service<
     >;
     readonly status: Effect.Effect<PeerStatus, LocalAccountHostError>;
     readonly check: (deviceId: string) => Effect.Effect<PeerDeviceStatus, LocalAccountHostError>;
+    readonly pendingPairings: Effect.Effect<
+      ReadonlyArray<DevicePairingRequest>,
+      LocalAccountHostError
+    >;
+    readonly approvePairing: (
+      code: string,
+    ) => Effect.Effect<DevicePairingApproval, LocalAccountHostError>;
+    readonly denyPairing: (code: string) => Effect.Effect<void, LocalAccountHostError>;
   }
 >()("mines/account/LocalAccountHost") {}
 
@@ -150,6 +181,16 @@ const make = Effect.gen(function* () {
     check: Effect.fn("LocalAccountHost.check")((deviceId) =>
       connection.use((operations) => operations.check(deviceId)),
     ),
+    pendingPairings: connection.use((operations) => operations.pendingPairings),
+    approvePairing: Effect.fn("LocalAccountHost.approvePairing")((code) =>
+      connection.use(
+        (operations) => operations.approvePairing({ code, scopes: AuthStandardClientScopes }),
+        { scopes: AuthStandardClientScopes },
+      ),
+    ),
+    denyPairing: Effect.fn("LocalAccountHost.denyPairing")((code) =>
+      connection.use((operations) => operations.denyPairing(code)),
+    ),
   });
 });
 
@@ -189,7 +230,10 @@ const makeConnection = Effect.gen(function* () {
     return url;
   });
   const use = Effect.fn("LocalAccountConnection.use")(
-    <A, E>(run: (operations: HostOperations) => Effect.Effect<A, E>) =>
+    <A, E>(
+      run: (operations: HostOperations) => Effect.Effect<A, E>,
+      options?: { readonly scopes: ReadonlyArray<AuthEnvironmentScope> },
+    ) =>
       Effect.scoped(
         Effect.gen(function* () {
           const url = yield* origin();
@@ -197,7 +241,7 @@ const makeConnection = Effect.gen(function* () {
             auth
               .issueSession({
                 ttl: Duration.minutes(5),
-                scopes: [AuthAccessReadScope, AuthAccessWriteScope],
+                scopes: options?.scopes ?? [AuthAccessReadScope, AuthAccessWriteScope],
                 label: "mines account cli",
               })
               .pipe(
@@ -270,7 +314,12 @@ const makeConnection = Effect.gen(function* () {
                 Effect.timeout("20 seconds"),
                 Effect.mapError(
                   (cause) =>
-                    new LocalAccountHostError({ code: "unavailable", phase: "rpc", cause }),
+                    new LocalAccountHostError({
+                      code: "unavailable",
+                      phase: "rpc",
+                      cause,
+                      ...(isDevicePairingError(cause) ? { pairingFailure: cause.code } : {}),
+                    }),
                 ),
               ),
           );
@@ -282,6 +331,9 @@ const makeConnection = Effect.gen(function* () {
             deviceState: request(client[WS_METHODS.peerGetState]({})),
             status: request(client[WS_METHODS.peerStatus]({})),
             check: (deviceId) => request(client[WS_METHODS.peerCheckDevice]({ deviceId })),
+            pendingPairings: request(client[WS_METHODS.peerPairingRequests]({})),
+            approvePairing: (input) => request(client[WS_METHODS.peerApprovePairing](input)),
+            denyPairing: (code) => request(client[WS_METHODS.peerDenyPairing]({ code })),
           });
         }),
       ),

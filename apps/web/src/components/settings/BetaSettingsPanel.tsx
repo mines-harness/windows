@@ -86,7 +86,7 @@ function GuestLinksRow() {
           Share a mine with a guest who watches it live in their browser and sends messages you
           approve. Needs T3 Connect: sign in and link this machine in{" "}
           <Link to="/settings/connections" className="underline underline-offset-2">
-            Connections
+            Devices
           </Link>
           . While it is off, every guest link stops working.
         </>

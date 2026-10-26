@@ -1,8 +1,5 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
-  CLI_RELEASE_BASE_URL_ENV,
-  CLI_RELEASE_REPOSITORY_ENV,
-  resolveCliReleaseBaseUrl,
   CLI_RELEASE_CHANNELS,
   cliReleaseIndexPageUrl,
   cliReleaseChannelOf,
@@ -22,6 +19,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
+import { resolveCliReleaseSource } from "../cloud/cliReleaseSource.ts";
 import {
   ensurePinnedRuntimeInstalled,
   launcherOwnsVersionsDir,
@@ -63,8 +61,9 @@ export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(funct
   const httpClient = yield* HttpClient.HttpClient;
   const environment = yield* HostProcess.Environment;
   const githubToken = environment.GH_TOKEN?.trim() || environment.GITHUB_TOKEN?.trim() || undefined;
+  const { repository } = resolveCliReleaseSource(environment);
   for (let page = 1; page <= RELEASE_INDEX_MAX_PAGES; page += 1) {
-    const url = cliReleaseIndexPageUrl(page, environment[CLI_RELEASE_REPOSITORY_ENV]);
+    const url = cliReleaseIndexPageUrl(page, repository);
     if (url === undefined)
       return yield* new CliUpdateError({
         reason:
@@ -314,10 +313,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const httpClient = yield* HttpClient.HttpClient;
   const service = yield* BootService.BootService;
 
-  const releaseBaseUrl = resolveCliReleaseBaseUrl(
-    environment[CLI_RELEASE_BASE_URL_ENV],
-    environment[CLI_RELEASE_REPOSITORY_ENV],
-  );
+  const { releaseBaseUrl } = resolveCliReleaseSource(environment);
   if (releaseBaseUrl === undefined)
     return yield* new CliUpdateError({
       reason:

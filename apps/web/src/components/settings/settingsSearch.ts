@@ -87,7 +87,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
   "/settings/storage": "Storage",
-  "/settings/connections": "Connections",
+  "/settings/connections": "Devices",
   "/settings/beta": "Beta",
   "/settings/archived": "Archive",
 };
@@ -937,8 +937,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "direct-device-access",
-    title: "Direct device access",
+    title: "Allow connections to this computer",
     to: "/settings/connections",
+    targetId: "this-computer-access",
     searchTerms: [
       "phone remote approve qr pairing code revoke device keys connection signaling stun webrtc",
     ],
@@ -947,6 +948,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "connect-peer-computer",
     title: "Connect another computer",
     to: "/settings/connections",
+    targetId: "your-other-computers",
     searchTerms: ["remote peer pair pairing trust host device approval key direct connection"],
   },
   {
@@ -1150,6 +1152,7 @@ export function searchSettings(
       const fields = [
         title,
         normalizeSearchText(SETTINGS_SECTION_LABELS[item.to]),
+        normalizeSearchText(item.to.slice("/settings/".length)),
         ...(item.searchTerms ?? []).map(normalizeSearchText),
       ];
       if (!queryTokens.every((token) => fields.some((field) => field.includes(token)))) return [];

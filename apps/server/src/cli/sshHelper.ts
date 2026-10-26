@@ -8,6 +8,8 @@ import * as NodeNet from "node:net";
 import * as Effect from "effect/Effect";
 import { Argument, Command } from "effect/cli";
 
+import { prepareSshLauncher, runtimeOwnedByLauncher } from "./sshLauncher.ts";
+
 const canBind = (port: number) =>
   new Promise<boolean>((resolve) => {
     const server = NodeNet.createServer();
@@ -124,7 +126,27 @@ const runtimePort = Command.make("runtime-port", {
   ),
 );
 
+const prepareLauncher = Command.make("prepare-launcher", {
+  baseDir: Argument.String("base-dir"),
+  version: Argument.String("version"),
+}).pipe(
+  Command.withHandler(({ baseDir, version }) =>
+    Effect.tryPromise(() => prepareSshLauncher(baseDir, version)),
+  ),
+);
+
+const runtimeOwned = Command.make("runtime-owned", {
+  runtimeFile: Argument.String("runtime-file"),
+  launcherPid: Argument.Int("launcher-pid"),
+}).pipe(
+  Command.withHandler(({ runtimeFile, launcherPid }) =>
+    Effect.promise(async () => {
+      if (!(await runtimeOwnedByLauncher(runtimeFile, launcherPid))) process.exitCode = 1;
+    }),
+  ),
+);
+
 export const sshHelperCommand = Command.make("__ssh-helper").pipe(
   Command.unlisted,
-  Command.withSubcommands([pickPort, waitReady, runtimePort]),
+  Command.withSubcommands([pickPort, waitReady, runtimePort, prepareLauncher, runtimeOwned]),
 );

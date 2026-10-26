@@ -113,6 +113,48 @@ it("uses standard routing when the catalog has no default service tier", () => {
   ]);
 });
 
+it.each([
+  ["gpt-6-astra", "fast", "catalog"],
+  ["openai.gpt-6-astra", "priority", "catalog"],
+  ["gpt-6-astra", "fast", "legacy"],
+  ["openai.gpt-6-astra", "priority", "legacy"],
+] as const)("clarifies Astra usage for %s %s through the %s catalog", (model, fastId, source) => {
+  const tiers = [
+    { id: fastId, name: "Fast", description: "1.5x speed, increased usage" },
+    { id: "ultrafast", name: "Ultrafast", description: "Even faster" },
+    { id: "flex", name: "Flex", description: "Catalog-provided flex guidance" },
+  ];
+  const capabilities = mapCodexModelCapabilities({
+    additionalSpeedTiers: source === "legacy" ? [fastId, "ultrafast"] : [],
+    defaultReasoningEffort: "medium",
+    description: "Astra",
+    displayName: "GPT-6 Astra",
+    hidden: false,
+    id: model,
+    isDefault: true,
+    model,
+    serviceTiers: source === "catalog" ? tiers : [],
+    supportedReasoningEfforts: [],
+  });
+  const serviceTier = capabilities.optionDescriptors?.find((option) => option.id === "serviceTier");
+  assert.equal(serviceTier?.type, "select");
+  if (serviceTier?.type !== "select") throw new Error("Missing service tiers");
+  const fast = serviceTier.options.find((option) => option.id === fastId);
+  assert.include(fast?.description ?? "", "2.5× subscription usage");
+  assert.include(fast?.description ?? "", "2× credits");
+  assert.include(fast?.description ?? "", "API token pricing is separate");
+  const ultrafast = serviceTier.options.find((option) => option.id === "ultrafast");
+  assert.include(ultrafast?.description ?? "", "8× subscription usage");
+  assert.include(ultrafast?.description ?? "", "6× credits");
+  assert.isUndefined(serviceTier.options.find((option) => option.id === "default")?.description);
+  if (source === "catalog") {
+    assert.equal(
+      serviceTier.options.find((option) => option.id === "flex")?.description,
+      "Catalog-provided flex guidance",
+    );
+  }
+});
+
 it("marks the most preferred available model as default", () => {
   const models = applyPreferredCodexDefaultModel([
     { slug: "gpt-5.6-terra", name: "GPT-5.6-Terra", isCustom: false, capabilities: null },

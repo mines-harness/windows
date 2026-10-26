@@ -12,6 +12,7 @@ import * as PeerManagement from "./PeerManagement.ts";
 import * as PeerTrustStore from "./PeerTrustStore.ts";
 import * as PeerHost from "./PeerHost.ts";
 import * as HostSignalingService from "./HostSignalingService.ts";
+import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 
 const local = createPeerIdentity(new Uint8Array(32).fill(10), "Mac");
 const remote = createPeerIdentity(new Uint8Array(32).fill(11), "Host");
@@ -77,11 +78,17 @@ const fixture = (existing?: PeerSession, fail = false, beforeConnect = Effect.vo
       list: Effect.sync(() => approved),
       selectAccount: () => Effect.void,
       approve: () => Effect.void,
+      beginApproval: () => Effect.die("Unused pairing approval"),
       revoke: () => Effect.void,
     });
     const deps = Layer.mergeAll(
       Layer.succeed(HostSignalingService.HostSignalingService, signaling),
       Layer.succeed(PeerTrustStore.PeerTrustStore, trust),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+        listPairingLinks: () => Effect.succeed([]),
+        listSessions: () => Effect.succeed([]),
+        revokeDevicePairingAccess: () => Effect.void,
+      }),
       Layer.succeed(PeerHost.PeerHost, {
         accept: () => Effect.fail(new PeerError({ code: "closed" })),
         disconnectDevice: () => Effect.void,

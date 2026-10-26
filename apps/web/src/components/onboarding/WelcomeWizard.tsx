@@ -267,10 +267,17 @@ export function WelcomeWizard({
           {step === "connection" ? (
             <ConnectionStep
               localAvailable={localAvailable}
+              currentEnvironmentId={primaryEnvironment?.environmentId ?? null}
               selectedIds={selectedIds}
               onSelectionChange={setSelection}
               onContinue={() =>
-                startSetup(resolveOnboardingSetup(environments, selectedIds).environmentIds)
+                startSetup(
+                  resolveOnboardingSetup(
+                    environments,
+                    selectedIds,
+                    primaryEnvironment?.environmentId,
+                  ).environmentIds,
+                )
               }
             />
           ) : step === "agents" ? (
@@ -314,20 +321,28 @@ export function WelcomeWizard({
 
 function ConnectionStep({
   localAvailable,
+  currentEnvironmentId,
   selectedIds,
   onSelectionChange,
   onContinue,
 }: {
   readonly localAvailable: boolean;
+  readonly currentEnvironmentId: EnvironmentId | null;
   readonly selectedIds: ReadonlySet<EnvironmentId>;
   readonly onSelectionChange: (ids: ReadonlySet<EnvironmentId>) => void;
   readonly onContinue: () => void;
 }) {
   const { environments } = useEnvironments();
   const directEnvironments = environments.filter(
-    (environment) => !isOnboardingRelayEnvironment(environment),
+    (environment) =>
+      environment.environmentId !== currentEnvironmentId &&
+      !isOnboardingRelayEnvironment(environment),
   );
-  const { ready, skippedIds } = resolveOnboardingSetup(environments, selectedIds);
+  const { ready, skippedIds } = resolveOnboardingSetup(
+    environments,
+    selectedIds,
+    currentEnvironmentId,
+  );
   const skippedLabels = environments
     .filter((environment) => skippedIds.includes(environment.environmentId))
     .map((environment) => environment.label);
@@ -347,13 +362,13 @@ function ConnectionStep({
         Your work, wherever you are
       </h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-        Start with this computer or connect another device. Then bring your agents and existing work
-        into mines.
+        Start on this computer. Add any other devices, then bring your agents and existing work into
+        mines.
       </p>
       <MinesIdentityCard />
       {directEnvironments.length > 0 ? (
         <fieldset className="mt-5 space-y-2">
-          <legend className="sr-only">Computers to set up</legend>
+          <legend className="sr-only">Other computers to set up</legend>
           {directEnvironments.map((environment) => (
             <label
               key={environment.environmentId}

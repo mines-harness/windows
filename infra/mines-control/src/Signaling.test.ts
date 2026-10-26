@@ -83,6 +83,84 @@ const description = {
 };
 
 it.effect(
+  "refreshes only an active device's self-signed name and platform when issuing a device ticket",
+  () => {
+    const renamed = {
+      ...first,
+      device: { ...first.device, label: "OVH server", platform: "linux" as const },
+    };
+    let stored = first.device;
+    const directory = Layer.mock(DeviceDirectory.DeviceDirectory, {
+      owner: () => Effect.succeedSome({ accountId: "account", publicKey: first.device.publicKey }),
+      list: () => Effect.succeed([stored]),
+      register: (accountId, device, options) =>
+        Effect.sync(() => {
+          expect(accountId).toBe("account");
+          expect(options).toEqual({ existingOnly: true });
+          stored = device;
+        }),
+    });
+    return Effect.gen(function* () {
+      const signaling = yield* Signaling.Signaling;
+      const ticket = yield* signaling.deviceTicket(
+        signPeerDeviceProof(renamed, "ticket", "rename_nonce_identifier", 0),
+      );
+      const opened = yield* signaling.connect(ticket, connection());
+      expect(opened.device.label).toBe("OVH server");
+      expect(opened.device.platform).toBe("linux");
+      expect(opened.device.deviceId).toBe(first.device.deviceId);
+      expect(opened.device.publicKey).toBe(first.device.publicKey);
+    }).pipe(
+      Effect.provide(
+        Signaling.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(NodeCrypto.layer, directory, Layer.mock(Contacts.Contacts, {})),
+          ),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect(
+  "does not reactivate a device revoked between ownership lookup and metadata refresh",
+  () => {
+    let revoked = false;
+    const directory = Layer.mock(DeviceDirectory.DeviceDirectory, {
+      owner: () =>
+        Effect.sync(() => {
+          revoked = true;
+          return Option.some({ accountId: "account", publicKey: first.device.publicKey });
+        }),
+      register: (_accountId, _device, options) =>
+        Effect.suspend(() => {
+          if (!options?.existingOnly) revoked = false;
+          return revoked ? Effect.fail(new PeerError({ code: "unapproved-device" })) : Effect.void;
+        }),
+    });
+    return Effect.gen(function* () {
+      const signaling = yield* Signaling.Signaling;
+      expect(
+        yield* Effect.flip(
+          signaling.deviceTicket(
+            signPeerDeviceProof(first, "ticket", "revocation_nonce_identifier", 0),
+          ),
+        ),
+      ).toMatchObject({ code: "unapproved-device" });
+      expect(revoked).toBe(true);
+    }).pipe(
+      Effect.provide(
+        Signaling.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(NodeCrypto.layer, directory, Layer.mock(Contacts.Contacts, {})),
+          ),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect(
   "routes group-scoped cross-account signaling only while its invitation stays accepted",
   () =>
     Effect.gen(function* () {

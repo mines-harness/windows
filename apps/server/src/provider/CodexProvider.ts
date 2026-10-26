@@ -110,6 +110,13 @@ const DEFAULT_SERVICE_TIER_ID = "default";
 const SERVICE_TIER_DESCRIPTIONS: Readonly<Record<string, string>> = {
   ultrafast: "Even faster, more expensive",
 };
+const ASTRA_FAST_USAGE_DESCRIPTION =
+  "2.5× subscription usage · 2× credits. API token pricing is separate.";
+const ASTRA_SERVICE_TIER_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  fast: ASTRA_FAST_USAGE_DESCRIPTION,
+  priority: ASTRA_FAST_USAGE_DESCRIPTION,
+  ultrafast: "8× subscription usage · 6× credits. API token pricing is separate.",
+};
 
 function reasoningEffortLabel(reasoningEffort: string): string {
   return REASONING_EFFORT_LABELS[reasoningEffort] ?? reasoningEffort;
@@ -199,6 +206,10 @@ export function mapCodexModelCapabilities(
     ? model.defaultServiceTier
     : null;
   const defaultServiceTier = catalogDefaultServiceTier ?? DEFAULT_SERVICE_TIER_ID;
+  const serviceTierDescriptions =
+    codexModelFamily(model.model) === "gpt-6-astra"
+      ? ASTRA_SERVICE_TIER_DESCRIPTIONS
+      : SERVICE_TIER_DESCRIPTIONS;
   const optionDescriptors: ProviderOptionDescriptor[] = [];
 
   if (reasoningOptions.length > 0) {
@@ -222,7 +233,7 @@ export function mapCodexModelCapabilities(
           ...(defaultServiceTier === DEFAULT_SERVICE_TIER_ID ? { isDefault: true } : {}),
         },
         ...serviceTiers.map((tier) => {
-          const description = SERVICE_TIER_DESCRIPTIONS[tier.id] ?? tier.description;
+          const description = serviceTierDescriptions[tier.id] ?? tier.description;
           return {
             id: tier.id,
             label: tier.name,

@@ -5,6 +5,7 @@ import * as RemoteGroupTransport from "./groupChat/RemoteGroupTransport.ts";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as HostSignalingService from "./peer/HostSignalingService.ts";
 import * as PeerManagement from "./peer/PeerManagement.ts";
+import * as PeerPairing from "./peer/PeerPairing.ts";
 import * as CloudTaskService from "./cloud/CloudTaskService.ts";
 import * as ProviderVoiceService from "./provider/ProviderVoiceService.ts";
 import * as GroupChatService from "./groupChat/GroupChatService.ts";
@@ -1316,6 +1317,7 @@ export const layerWsRpc = (
       const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
       const hostSignaling = yield* HostSignalingService.HostSignalingService;
       const peers = yield* PeerManagement.PeerManagement;
+      const peerPairing = yield* PeerPairing.PeerPairing;
       const catalog = yield* HostCatalogService.HostCatalogService;
       const cloudTasks = yield* CloudTaskService.CloudTaskService;
       const voice = yield* ProviderVoiceService.ProviderVoiceService;
@@ -2881,6 +2883,10 @@ export const layerWsRpc = (
         [WS_METHODS.peerGetState]: (_input) => peers.state,
         [WS_METHODS.peerStatus]: (_input) => peers.status,
         [WS_METHODS.peerCheckDevice]: (input) => peers.checkDevice(input),
+        [WS_METHODS.peerPairingRequests]: (_input) => peerPairing.pending,
+        [WS_METHODS.peerApprovePairing]: (input) =>
+          peerPairing.approve(input, currentSession.scopes),
+        [WS_METHODS.peerDenyPairing]: (input) => peerPairing.deny(input),
         [WS_METHODS.peerApprove]: (input) => peers.approve(input),
         [WS_METHODS.peerRevoke]: (input) => peers.revoke(input),
         [WS_METHODS.cloudSnapshot]: (_input) => cloudTasks.snapshot,

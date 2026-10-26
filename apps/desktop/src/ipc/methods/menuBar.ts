@@ -100,8 +100,7 @@ export const installMenuBar = Effect.fn("desktop.ipc.installMenuBar")(function* 
         click: () => dispatch("mines:accounts"),
       })),
       { label: "Manage accounts…", click: () => dispatch("mines:accounts") },
-      { label: "Your computers…", click: () => dispatch("mines:devices") },
-      { label: "Pair a phone…", click: () => dispatch("mines:devices") },
+      { label: "Manage devices…", click: () => dispatch("mines:devices") },
       { type: "separator" },
       { label: "Quit mines", role: "quit" },
     ]);

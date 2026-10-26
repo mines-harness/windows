@@ -2,7 +2,11 @@
 import * as NodeCrypto from "node:crypto";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { authScopeResponse, AuthStandardClientScopes } from "@t3tools/contracts";
+import {
+  authScopeResponse,
+  AuthStandardClientScopes,
+  type AuthClientSession,
+} from "@t3tools/contracts";
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
@@ -10,9 +14,12 @@ import {
 } from "@t3tools/shared/dpop";
 import { expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -21,6 +28,7 @@ import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 
 import * as ServerSecretStore from "./ServerSecretStore.ts";
 import * as SessionStore from "./SessionStore.ts";
+import * as PairingGrantStore from "./PairingGrantStore.ts";
 
 const TEST_SERVER_PORT = 13_773;
 
@@ -44,6 +52,13 @@ const layerEnvironmentAuth = (overrides?: Partial<ServerConfig.ServerConfig["Ser
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(layerServerConfig(overrides)),
   );
+
+const layerExchangeAuth = EnvironmentAuth.layer.pipe(
+  Layer.provideMerge(SqlitePersistence.layerMemory),
+  Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(ServerEnvironment.layerIdentity),
+  Layer.provideMerge(layerServerConfig({ mode: "web" })),
+);
 
 const makeCookieRequest = (
   cookieName: string,
@@ -108,6 +123,74 @@ const makeDpopKey = () => {
 };
 
 it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
+  it.effect.each(["bearer", "browser"] as const)(
+    "revokes a %s session while its device grant exchange is in flight",
+    (method) =>
+      Effect.gen(function* () {
+        const store = yield* SessionStore.SessionStore;
+        const grants = yield* PairingGrantStore.PairingGrantStore;
+        let active: ReadonlyArray<AuthClientSession> = [];
+        const issuing = yield* Deferred.make<void>();
+        const continueIssue = yield* Deferred.make<void>();
+        const revoking = yield* Deferred.make<void>();
+        const auth = yield* EnvironmentAuth.make.pipe(
+          Effect.provideService(SessionStore.SessionStore, {
+            ...store,
+            issue: (input) =>
+              Effect.gen(function* () {
+                yield* Deferred.succeed(issuing, undefined);
+                yield* Deferred.await(continueIssue);
+                const issued = yield* store.issue(input);
+                active = yield* store.listActive();
+                return issued;
+              }),
+            listActive: () => Effect.sync(() => active),
+            revoke: (id) =>
+              store.revoke(id).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    active = active.filter((session) => session.sessionId !== id);
+                  }),
+                ),
+              ),
+          }),
+          Effect.provideService(PairingGrantStore.PairingGrantStore, {
+            ...grants,
+            listActive: () => Effect.succeed([]),
+          }),
+        );
+        const grant = yield* auth.createPairingLink({
+          subject: "peer-device:test-device:test-request",
+          scopes: ["orchestration:read"],
+        });
+        const exchange = yield* (
+          method === "bearer"
+            ? auth
+                .exchangeBootstrapCredentialForAccessToken(
+                  grant.credential,
+                  undefined,
+                  requestMetadata,
+                )
+                .pipe(Effect.map((result) => result.access_token))
+            : auth
+                .createBrowserSession(grant.credential, requestMetadata)
+                .pipe(Effect.map((result) => result.sessionToken))
+        ).pipe(Effect.forkChild);
+        yield* Deferred.await(issuing);
+        const revoke = yield* Effect.gen(function* () {
+          yield* Deferred.succeed(revoking, undefined);
+          yield* auth.revokeDevicePairingAccess("test-device");
+        }).pipe(Effect.forkChild);
+        yield* Deferred.await(revoking);
+        yield* TestClock.adjust(0);
+        yield* Deferred.succeed(continueIssue, undefined);
+        const token = yield* Fiber.join(exchange);
+        yield* Fiber.join(revoke);
+        expect(yield* auth.listSessions()).toEqual([]);
+        expect(yield* Effect.result(store.verify(token))).toMatchObject({ _tag: "Failure" });
+      }).pipe(Effect.provide(layerExchangeAuth)),
+  );
+
   it.effect("uses the reusable dev cookie without overriding a normal scoped cookie", () =>
     Effect.gen(function* () {
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;

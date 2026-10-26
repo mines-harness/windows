@@ -50,6 +50,10 @@
     "./orchestrationV2": {
       "types": "./src/orchestrationV2.ts",
       "import": "./src/orchestrationV2.ts"
+    },
+    "./minesDevicePairing": {
+      "types": "./src/minesDevicePairing.ts",
+      "import": "./src/minesDevicePairing.ts"
     }
   },
   "scripts": {

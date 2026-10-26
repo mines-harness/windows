@@ -48,7 +48,82 @@ const check = Command.make("check", {
     ),
   ),
 );
+
+const pending = Command.make("pending", {
+  ...authLocationFlags,
+  json: accountJsonFlag,
+}).pipe(
+  Command.withDescription("Show devices waiting for permission to use this host."),
+  Command.withHandler((flags) =>
+    runWithAccount(flags, (account) =>
+      Effect.gen(function* () {
+        const requests = yield* account.pendingPairings;
+        if (flags.json) {
+          yield* Console.log(
+            formatAccountJson({
+              requests: requests.map((request) => ({
+                code: request.code,
+                requester: request.requester.label,
+              })),
+            }),
+          );
+          return;
+        }
+        if (!requests.length) {
+          yield* Console.log("No devices are waiting for approval.");
+          return;
+        }
+        for (const request of requests)
+          yield* Console.log(
+            `${request.requester.label}\n  Code: ${request.code}\n  Approve: mines devices approve ${request.code}`,
+          );
+      }),
+    ),
+  ),
+);
+
+const approve = Command.make("approve", {
+  ...authLocationFlags,
+  json: accountJsonFlag,
+  code: Argument.String("code"),
+}).pipe(
+  Command.withDescription("Approve a device's short code and allow it to use this host."),
+  Command.withHandler((flags) =>
+    runWithAccount(flags, (account) =>
+      Effect.gen(function* () {
+        const result = yield* account.approvePairing(flags.code);
+        yield* Console.log(
+          flags.json
+            ? formatAccountJson({
+                status: "approved",
+                code: result.code,
+                requester: result.requester.label,
+              })
+            : `${result.requester.label} approved. Return to that device to finish connecting.`,
+        );
+      }),
+    ),
+  ),
+);
+
+const deny = Command.make("deny", {
+  ...authLocationFlags,
+  json: accountJsonFlag,
+  code: Argument.String("code"),
+}).pipe(
+  Command.withDescription("Decline a device's request to use this host."),
+  Command.withHandler((flags) =>
+    runWithAccount(flags, (account) =>
+      Effect.gen(function* () {
+        yield* account.denyPairing(flags.code);
+        yield* Console.log(
+          flags.json ? formatAccountJson({ status: "denied" }) : "Device request declined.",
+        );
+      }),
+    ),
+  ),
+);
 export const devicesCommand = Command.make("devices").pipe(
   Command.withDescription("Find and check devices on your Mines account."),
-  Command.withSubcommands([list, check]),
+  Command.withSubcommands([list, check, pending, approve, deny]),
 );

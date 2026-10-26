@@ -66,7 +66,9 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
           order.push("extract");
           const stagingDir = input.args[input.args.indexOf("-C") + 1];
           if (stagingDir === undefined) return yield* Effect.die("missing tar target");
-          yield* fs.writeFileString(path.join(stagingDir, "t3"), "#!/bin/sh\n").pipe(Effect.orDie);
+          yield* fs
+            .writeFileString(path.join(stagingDir, "mines"), "#!/bin/sh\n")
+            .pipe(Effect.orDie);
           return {
             stdout: "",
             stderr: "",
@@ -119,7 +121,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
         ConfigProvider.fromEnv({
           env:
             options.releaseConfigured === false
-              ? {}
+              ? { MINES_CLI_UPDATE_REPOSITORY: "pingdotgg/t3code" }
               : { MINES_CLI_RELEASE_BASE_URL: "https://releases.example/download" },
         }),
       ),
@@ -142,7 +144,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
 });
 
 it.layer(NodeServices.layer)("server self update", (it) => {
-  it.effect("disables service updates until an own release source is configured", () =>
+  it.effect("rejects an explicitly configured upstream source before downloading", () =>
     Effect.gen(function* () {
       const { selfUpdate, order } = yield* makeHarness({ releaseConfigured: false });
       const error = yield* selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip);
@@ -453,7 +455,7 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     for (const version of [staleVersion, packageJson.version]) {
       const directory = path.join(realHome, "runtime", "versions", version);
       yield* fs.makeDirectory(directory, { recursive: true });
-      yield* fs.writeFileString(path.join(directory, "t3"), "");
+      yield* fs.writeFileString(path.join(directory, "mines"), "");
       const sentinel = path.join(directory, ".install-complete");
       yield* fs.writeFileString(sentinel, `${version}\n`);
       yield* fs.utimes(sentinel, 0, 0);
@@ -462,7 +464,7 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     // Like `process.execPath`, the running runtime is reported by its real path.
     const executablePath =
       input.executable === "own runtime"
-        ? yield* fs.realPath(path.join(versionsDir, packageJson.version, "t3"))
+        ? yield* fs.realPath(path.join(versionsDir, packageJson.version, "mines"))
         : "/usr/local/bin/node";
     const removed = yield* ServerSelfUpdate.pruneRuntimesOnStart({
       baseDir,
@@ -476,7 +478,7 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     return { removed, remaining: (yield* fs.readDirectory(versionsDir)).toSorted() };
   });
 
-  // The SSH launcher runs `t3 serve` straight from the pinned runtime, with no boot service.
+  // The SSH launcher runs `mines serve` straight from the pinned runtime, with no boot service.
   it.effect("prunes for a server started from its home's pinned runtime", () =>
     Effect.gen(function* () {
       const { removed, remaining } = yield* pruneOnStart({ executable: "own runtime" });

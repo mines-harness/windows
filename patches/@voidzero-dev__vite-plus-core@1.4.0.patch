@@ -1,0 +1,13 @@
+diff --git a/dist/tsdown/target-HZbF5Cux-jmYNzzqT.js b/dist/tsdown/target-HZbF5Cux-jmYNzzqT.js
+index 4c904a40f18af2068fb0e37b24bffcf1ac748dfe..68e9a49ac705ecd4f31aa71f71531cadd541f441 100644
+--- a/dist/tsdown/target-HZbF5Cux-jmYNzzqT.js
++++ b/dist/tsdown/target-HZbF5Cux-jmYNzzqT.js
+@@ -503,7 +503,7 @@ async function buildSingleExe(config, bundledFile, outputFile, executable, targe
+ 		const seaConfig = {
+ 			disableExperimentalSEAWarning: true,
+ 			...exe.seaConfig,
+-			main: bundledFile,
++			main: path.relative(process.cwd(), bundledFile),
+ 			output: outputPath,
+ 			mainFormat: config.format === "es" ? "module" : "commonjs"
+ 		};

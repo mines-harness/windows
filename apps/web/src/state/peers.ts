@@ -32,6 +32,23 @@ export const peerCheckDevice = createEnvironmentRpcCommand(connectionAtomRuntime
   tag: WS_METHODS.peerCheckDevice,
 });
 
+export const peerPairingRequests = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "mines:peer:pairing-requests",
+  tag: WS_METHODS.peerPairingRequests,
+  staleTimeMs: 10_000,
+  idleTtlMs: 30_000,
+});
+
+export const peerApprovePairing = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "mines:peer:approve-pairing",
+  tag: WS_METHODS.peerApprovePairing,
+});
+
+export const peerDenyPairing = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "mines:peer:deny-pairing",
+  tag: WS_METHODS.peerDenyPairing,
+});
+
 export const peerConfigure = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "mines:peer:configure",
   tag: WS_METHODS.peerConfigure,

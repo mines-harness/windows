@@ -75,6 +75,7 @@ export * from "./groupChat.ts";
 export * from "./executionTargets.ts";
 
 export * from "./peerManagement.ts";
+export * from "./minesDevicePairing.ts";
 
 export * from "./mineTransfer.ts";
 export * from "./providerVoice.ts";

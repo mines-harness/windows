@@ -93,6 +93,7 @@ const make = Effect.gen(function* () {
         tickets.size >= 10_000
       )
         return yield* new PeerError({ code: "unapproved-device" });
+      yield* directory.register(owner.value.accountId, verified.device, { existingOnly: true });
       const ticket = yield* crypto
         .randomUUIDv4()
         .pipe(Effect.mapError(() => new PeerError({ code: "direct-unavailable" })));

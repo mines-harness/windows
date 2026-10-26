@@ -51,12 +51,17 @@ export function resolveOnboardingTargetEnvironment<TEnvironment extends Onboardi
 export function resolveOnboardingSetup(
   environments: ReadonlyArray<Pick<OnboardingEnvironment, "environmentId" | "connection">>,
   selectedIds: ReadonlySet<EnvironmentId>,
+  currentEnvironmentId?: EnvironmentId | null,
 ): {
   readonly ready: boolean;
   readonly environmentIds: ReadonlyArray<EnvironmentId>;
   readonly skippedIds: ReadonlyArray<EnvironmentId>;
 } {
-  const selected = environments.filter((environment) => selectedIds.has(environment.environmentId));
+  const selected = environments.filter(
+    (environment) =>
+      environment.environmentId === currentEnvironmentId ||
+      selectedIds.has(environment.environmentId),
+  );
   const idsInPhase = (keep: (phase: string) => boolean) =>
     selected
       .filter((environment) => keep(environment.connection.phase))

@@ -174,6 +174,22 @@ describe("resolveOnboardingSetup", () => {
   });
   const local = computer("local", "connected");
 
+  it("sets up the current computer without requiring it as a device selection", () => {
+    const remote = computer("remote", "connected");
+    expect(resolveOnboardingSetup([local, remote], new Set(), local.environmentId)).toEqual({
+      ready: true,
+      environmentIds: [local.environmentId],
+      skippedIds: [],
+    });
+    expect(
+      resolveOnboardingSetup([local, remote], new Set([remote.environmentId]), local.environmentId),
+    ).toEqual({
+      ready: true,
+      environmentIds: [local.environmentId, remote.environmentId],
+      skippedIds: [],
+    });
+  });
+
   it("skips selected computers that will not connect on their own", () => {
     const environments = [
       local,

@@ -2,6 +2,8 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   createPeerIdentity,
+  signPeerDeviceProof,
+  verifyPeerDeviceProof,
   signPeerSignal,
   verifyPeerSignal,
   validateDirectDescription,
@@ -14,6 +16,31 @@ const sdp =
   "\r\na=candidate:1 1 UDP 1 192.168.1.2 5000 typ host\r\n";
 
 describe("direct peer trust", () => {
+  it("signs device platform metadata without changing an existing identity", () => {
+    const key = new Uint8Array(32).fill(17);
+    const legacy = createPeerIdentity(key, "My Pixel");
+    const identity = createPeerIdentity(key, "My Pixel", "android");
+    expect(identity.device.platform).toBe("android");
+    expect(identity.device.deviceId).toBe(legacy.device.deviceId);
+    expect(identity.device.publicKey).toBe(legacy.device.publicKey);
+    const proof = signPeerDeviceProof(identity, "register", "metadata_nonce_001", 1000);
+    expect(verifyPeerDeviceProof(proof, "register", 1001).device).toEqual(identity.device);
+    expect(() =>
+      verifyPeerDeviceProof(
+        { ...proof, device: { ...proof.device, platform: "ios" } },
+        "register",
+        1001,
+      ),
+    ).toThrow();
+    expect(
+      verifyPeerDeviceProof(
+        signPeerDeviceProof(legacy, "register", "legacy_nonce_00001", 1000),
+        "register",
+        1001,
+      ).device,
+    ).toEqual(legacy.device);
+  });
+
   it("binds shared-group negotiation to its group and rejects a private downgrade", () => {
     const sender = createPeerIdentity(new Uint8Array(32).fill(1), "Mac");
     const recipient = createPeerIdentity(new Uint8Array(32).fill(2), "Phone");

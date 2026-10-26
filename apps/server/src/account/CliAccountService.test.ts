@@ -114,6 +114,16 @@ function fixture(
         checkedAt: null,
         failure: "unapproved-device",
       }),
+    pendingPairings: Effect.succeed([]),
+    approvePairing: (code) =>
+      Effect.sync(() => {
+        calls.push(`approve:${code}`);
+        return { code, requester: other };
+      }),
+    denyPairing: (code) =>
+      Effect.sync(() => {
+        calls.push(`deny:${code}`);
+      }),
     ...options.host,
   });
   return {
@@ -376,6 +386,109 @@ it.effect("preserves safe local-host diagnostics when linking a saved account fa
     );
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") expect(result.failure.message).toContain("ticket (HTTP 401)");
+    expect(test.values.size).toBe(1);
+  }),
+);
+
+it.effect("approves a short code only for the verified account on the matching host", () =>
+  Effect.gen(function* () {
+    const test = fixture({ saved: true });
+    const result = yield* CliAccountService.CliAccountService.pipe(
+      Effect.flatMap((account) => account.approvePairing("ABCD-EFGH")),
+      Effect.provide(test.layer),
+    );
+    expect(result).toEqual({ code: "ABCDEFGH", requester: other });
+    expect(test.calls).toEqual(["approve:ABCDEFGH"]);
+    expect(test.values.size).toBe(1);
+  }),
+);
+
+it.effect("does not manage pairing requests on a host bound to another account", () =>
+  Effect.gen(function* () {
+    const test = fixture({
+      saved: true,
+      host: {
+        state: Effect.succeed({
+          connection: { ...connection, accountId: "account-b" },
+          device: { device, approvedDevices: [] },
+        }),
+        pendingPairings: Effect.die("Must not list another account's requests"),
+        approvePairing: () => Effect.die("Must not approve another account's request"),
+        denyPairing: () => Effect.die("Must not deny another account's request"),
+      },
+    });
+    yield* Effect.gen(function* () {
+      const account = yield* CliAccountService.CliAccountService;
+      for (const operation of [
+        account.pendingPairings,
+        account.approvePairing("ABCD-EFGH"),
+        account.denyPairing("ABCD-EFGH"),
+      ]) {
+        const result = yield* Effect.result(operation);
+        expect(result._tag).toBe("Failure");
+      }
+    }).pipe(Effect.provide(test.layer));
+    expect(test.calls).toEqual([]);
+    expect(test.values.size).toBe(1);
+  }),
+);
+
+it.effect("does not approve device access after the saved account is revoked", () =>
+  Effect.gen(function* () {
+    const test = fixture({
+      saved: true,
+      account: { identity: () => Effect.succeedNone },
+      host: { approvePairing: () => Effect.die("Must not approve for a revoked account") },
+    });
+    const result = yield* CliAccountService.CliAccountService.pipe(
+      Effect.flatMap((account) => account.approvePairing("ABCD-EFGH")),
+      Effect.result,
+      Effect.provide(test.layer),
+    );
+    expect(result._tag).toBe("Failure");
+    expect(test.calls).toEqual([]);
+    expect(test.values.size).toBe(1);
+  }),
+);
+
+it.effect("rejects an invalid device code without forwarding an approval", () =>
+  Effect.gen(function* () {
+    const test = fixture({ saved: true });
+    const result = yield* CliAccountService.CliAccountService.pipe(
+      Effect.flatMap((account) => account.approvePairing("not-a-valid-code")),
+      Effect.result,
+      Effect.provide(test.layer),
+    );
+    expect(result._tag).toBe("Failure");
+    expect(test.calls).toEqual([]);
+  }),
+);
+
+it.effect("reports an expired device request without asking the user to sign in again", () =>
+  Effect.gen(function* () {
+    const test = fixture({
+      saved: true,
+      host: {
+        approvePairing: () =>
+          Effect.fail(
+            new LocalAccountHost.LocalAccountHostError({
+              code: "unavailable",
+              phase: "rpc",
+              pairingFailure: "expired",
+            }),
+          ),
+      },
+    });
+    const result = yield* CliAccountService.CliAccountService.pipe(
+      Effect.flatMap((account) => account.approvePairing("ABCD-EFGH")),
+      Effect.result,
+      Effect.provide(test.layer),
+    );
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.message).toContain("device request expired");
+      expect(result.failure.message).not.toContain("account login");
+    }
     expect(test.values.size).toBe(1);
   }),
 );

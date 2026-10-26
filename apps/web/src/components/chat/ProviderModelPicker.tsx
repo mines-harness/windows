@@ -55,6 +55,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   modelSettings?: ReactNode;
   modelSpeed?: "fast" | "ultrafast" | null;
+  modelReasoning?: string;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
@@ -182,6 +183,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const allModelNames = selectedEntries
     ? selectedEntries.map((selection) => selection.label).join(", ") || "Choose models"
     : undefined;
+  const reasoningLabel = !selectedEntries && !props.triggerLabel ? props.modelReasoning : undefined;
   const triggerTooltipContent = shortcutLabel
     ? `${props.triggerLabel ?? allModelNames ?? triggerLabel} · ${shortcutLabel}`
     : (props.triggerLabel ?? allModelNames ?? triggerLabel);
@@ -208,6 +210,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               props.compact
                 ? "max-w-42 shrink-0"
                 : !props.isComposerOwned && "max-w-48 sm:max-w-56",
+              reasoningLabel && "h-auto min-h-7 py-1",
               props.triggerClassName,
             )}
             disabled={props.disabled}
@@ -260,12 +263,24 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             <TooltipTrigger
               render={
                 <span
-                  className="min-w-0 flex-1 overflow-hidden truncate"
-                  data-chat-provider-model-picker-label="true"
+                  className={cn(
+                    "min-w-0 flex-1 overflow-hidden",
+                    reasoningLabel ? "flex flex-col items-end" : "truncate",
+                  )}
                 />
               }
             >
-              {props.triggerLabel ?? multipleLabel ?? triggerTitle}
+              <span
+                className={cn("max-w-full truncate", reasoningLabel && "leading-none")}
+                data-chat-provider-model-picker-label={reasoningLabel ? undefined : "true"}
+              >
+                {props.triggerLabel ?? multipleLabel ?? triggerTitle}
+              </span>
+              {reasoningLabel ? (
+                <span className="max-w-full truncate text-2xs leading-none font-normal text-muted-foreground">
+                  {reasoningLabel}
+                </span>
+              ) : null}
             </TooltipTrigger>
             <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
           </Tooltip>

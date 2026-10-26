@@ -34,6 +34,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -522,6 +523,10 @@ export class EnvironmentAuth extends Context.Service<
     readonly revokeSession: (
       sessionId: AuthSessionId,
     ) => Effect.Effect<boolean, ServerAuthInternalError>;
+    readonly revokeDevicePairingAccess: (
+      deviceId: string,
+      requestId?: string,
+    ) => Effect.Effect<void, ServerAuthInternalError>;
     readonly revokeOtherSessionsExcept: (
       sessionId: AuthSessionId,
     ) => Effect.Effect<number, ServerAuthInternalError>;
@@ -715,6 +720,7 @@ export const make = Effect.gen(function* () {
   const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
   const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
   const sessions = yield* SessionStore.SessionStore;
+  const pairingExchangeLock = yield* Semaphore.make(1);
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
   const descriptor = yield* policy.getDescriptor();
@@ -905,7 +911,7 @@ export const make = Effect.gen(function* () {
       } satisfies AuthBrowserSessionResult,
       sessionToken: session.token,
     } satisfies BootstrapExchangeResult;
-  });
+  }, pairingExchangeLock.withPermit);
 
   type ResolvedBootstrapGrant = Pick<
     PairingGrantStore.BootstrapGrant,
@@ -1006,6 +1012,7 @@ export const make = Effect.gen(function* () {
           ),
         ),
         Effect.withSpan("EnvironmentAuth.exchangeBootstrapCredentialForAccessToken"),
+        pairingExchangeLock.withPermit,
       );
     };
 
@@ -1122,6 +1129,19 @@ export const make = Effect.gen(function* () {
       Effect.mapError((cause) => new ServerAuthSessionRevocationError({ cause })),
       Effect.withSpan("EnvironmentAuth.revokeSession"),
     );
+
+  const revokeDevicePairingAccess = Effect.fn("EnvironmentAuth.revokeDevicePairingAccess")(
+    function* (deviceId: string, requestId?: string) {
+      const subject = `peer-device:${deviceId}${requestId ? `:${requestId}` : ""}`;
+      const matches = (value: string) =>
+        value === subject || (!requestId && value.startsWith(`${subject}:`));
+      for (const grant of yield* listPairingLinks())
+        if (matches(grant.subject)) yield* revokePairingLink(grant.id);
+      for (const session of yield* listSessions())
+        if (matches(session.subject)) yield* revokeSession(session.sessionId);
+    },
+    pairingExchangeLock.withPermit,
+  );
 
   const revokeOtherSessionsExcept: EnvironmentAuth["Service"]["revokeOtherSessionsExcept"] = (
     sessionId,
@@ -1387,6 +1407,7 @@ export const make = Effect.gen(function* () {
     issueSession,
     listSessions,
     revokeSession,
+    revokeDevicePairingAccess,
     revokeOtherSessionsExcept,
     listClientSessions,
     revokeClientSession,

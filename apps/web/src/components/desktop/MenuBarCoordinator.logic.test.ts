@@ -158,4 +158,34 @@ describe("menu bar activity", () => {
     };
     expect(decodeMenuBarState(state)).toEqual(state);
   });
+
+  it("keeps account discovery and approval separate from a connected session", () => {
+    const state = buildMenuBarState({
+      threads: [],
+      providers: [],
+      connectedDevices: 0,
+      totalDevices: 1,
+      devices: [
+        {
+          id: "device:ovh",
+          name: "OVH",
+          connected: false,
+          local: false,
+          status: "needs-approval",
+          presence: "online",
+        },
+      ],
+    });
+    expect(state.connectedDevices).toBe(0);
+    expect(decodeMenuBarState(state).devices).toEqual([
+      {
+        id: "device:ovh",
+        name: "OVH",
+        connected: false,
+        local: false,
+        status: "needs-approval",
+        presence: "online",
+      },
+    ]);
+  });
 });

@@ -38,10 +38,34 @@ it.effect("authenticates each release page until the requested channel is found"
   }),
 );
 
-it.effect("does not contact the upstream index when mines releases are unconfigured", () =>
+it.effect("checks the Mines distribution index without a shell release configuration", () =>
+  Effect.gen(function* () {
+    const urls: string[] = [];
+    const version = yield* resolveNewestVersion("stable").pipe(
+      Effect.provideService(HostProcess.Environment, {}),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          urls.push(request.url);
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, Response.json([{ tag_name: "v0.1.12" }])),
+          );
+        }),
+      ),
+    );
+    assert.equal(version, "0.1.12");
+    assert.deepStrictEqual(urls, [
+      "https://api.github.com/repos/mines-harness/cli/releases?per_page=100&page=1",
+    ]);
+  }),
+);
+
+it.effect("does not contact a rejected explicit upstream release index", () =>
   Effect.gen(function* () {
     const error = yield* resolveNewestVersion("stable").pipe(
-      Effect.provideService(HostProcess.Environment, {}),
+      Effect.provideService(HostProcess.Environment, {
+        MINES_CLI_UPDATE_REPOSITORY: "pingdotgg/t3code",
+      }),
       Effect.provideService(
         HttpClient.HttpClient,
         HttpClient.make(() => Effect.die("no request expected")),

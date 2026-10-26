@@ -13,10 +13,11 @@ import { createPeerIdentity } from "@t3tools/shared/minesPeerTrust";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Crypto from "expo-crypto";
+import * as Base64Url from "effect/encoding/Base64Url";
 import { MobileSecureStorage } from "../persistence/mobile-secure-storage";
 import { loadPeerIdentity, pairPhone, restorePhonePeers } from "./peerPairing";
 
-vi.mock("expo-device", () => ({ deviceName: "Test phone" }));
+vi.mock("expo-device", () => ({ deviceName: "Test phone", osName: "iOS" }));
 vi.mock("expo-crypto", () => ({
   getRandomBytes: vi.fn(() => new Uint8Array(32).fill(5)),
   randomUUID: () => "00000000-0000-4000-8000-000000000005",
@@ -107,7 +108,7 @@ beforeEach(() => {
   });
   transport.connect.mockResolvedValue({ remoteDeviceId: host.deviceId, close: transport.close });
   transport.fetch.mockImplementation(async (input: string) => {
-    if (String(input).endsWith("/.well-known/t3/environment"))
+    if (String(input).endsWith("/.well-known/mines/environment"))
       return Response.json({
         environmentId,
         label: "Desktop",
@@ -156,6 +157,26 @@ describe("mobile peer pairing", () => {
     }).pipe(Effect.provide(f.layer));
   });
 
+  it.effect(
+    "refreshes a generic phone label and platform while preserving its keys and custom name",
+    () => {
+      const f = fixture();
+      return Effect.gen(function* () {
+        const first = yield* loadPeerIdentity("user-a");
+        const key = [...f.secure.keys()][0]!;
+        const privateKey = Base64Url.encode(first.privateKey);
+        f.secure.set(key, JSON.stringify({ privateKey, label: "My phone" }));
+        const refreshed = yield* loadPeerIdentity("user-a");
+        expect(refreshed.device.label).toBe("Test phone");
+        expect(refreshed.device.platform).toBe("ios");
+        expect(refreshed.device.deviceId).toBe(first.device.deviceId);
+        expect(refreshed.device.publicKey).toBe(first.device.publicKey);
+        f.secure.set(key, JSON.stringify({ privateKey, label: "Travel phone" }));
+        expect((yield* loadPeerIdentity("user-a")).device.label).toBe("Travel phone");
+      }).pipe(Effect.provide(f.layer));
+    },
+  );
+
   it.effect("keeps independent device keys for separate mines accounts", () => {
     const f = fixture();
     return Effect.gen(function* () {
@@ -176,7 +197,7 @@ describe("mobile peer pairing", () => {
         yield* pairPhone({ pairingUrl, accountId: "user-a", getToken: async () => "clerk-token" });
         expect(transport.connect.mock.calls[0]?.[0].approved).toEqual(host);
         expect(transport.fetch.mock.calls.map((call) => String(call[0]))).toEqual([
-          "http://127.0.0.1/.well-known/t3/environment",
+          "http://127.0.0.1/.well-known/mines/environment",
           "http://127.0.0.1/oauth/token",
         ]);
         expect(transport.close).toHaveBeenCalledOnce();

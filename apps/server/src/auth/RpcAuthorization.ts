@@ -45,6 +45,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.peerConnectionState]: AuthAccessReadScope,
   [WS_METHODS.peerGetState]: AuthAccessReadScope,
   [WS_METHODS.peerStatus]: AuthAccessReadScope,
+  [WS_METHODS.peerPairingRequests]: AuthAccessReadScope,
   [WS_METHODS.groupsList]: AuthOrchestrationReadScope,
   [WS_METHODS.groupsGet]: AuthOrchestrationReadScope,
   [WS_METHODS.groupsSubscribe]: AuthOrchestrationReadScope,

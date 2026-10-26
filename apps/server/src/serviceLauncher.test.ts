@@ -160,7 +160,7 @@ it.layer(NodeServices.layer)("service state persistence", (it) => {
             "MINES_BOOT_SERVICE_UNIT=bad",
             "mines_boot_service_unit=bad",
             "MINES_SERVICE_LAUNCHER_CONTEXT=bad",
-            "t3_service_launcher_context=bad",
+            "mines_service_launcher_context=bad",
           ].join("\n"),
         );
         assert.deepEqual(yield* Effect.promise(() => readServiceEnvironment(root, inherited)), {
@@ -285,6 +285,18 @@ if (context.update?.status === "pending") {
           childSource,
         );
       }
+      const terminalCli = path.join(root, "bin", "mines");
+      const externalCli = path.join(root, "bin", "external-mines");
+      const regularCli = path.join(root, "bin", "custom-mines");
+      const oldExecutable = path.join(root, "runtime", "versions", "1.0.0", "mines");
+      yield* fs.makeDirectory(path.dirname(terminalCli));
+      yield* fs.symlink(oldExecutable, terminalCli);
+      yield* fs.symlink(path.join(root, "unrelated", "mines"), externalCli);
+      yield* fs.writeFileString(regularCli, "user managed executable");
+      yield* fs.writeFileString(
+        path.join(root, "runtime", "launchers"),
+        `${terminalCli}\n${externalCli}\n${regularCli}\n`,
+      );
       yield* Effect.promise(() =>
         writeServiceState(statePath, {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
@@ -303,6 +315,12 @@ if (context.update?.status === "pending") {
       const state = yield* Effect.promise(() => readServiceState(statePath));
       assert.equal(state.activeVersion, "1.1.0");
       assert.equal(state.update?.status, "committed");
+      assert.equal(
+        yield* fs.readLink(terminalCli),
+        path.join(root, "runtime", "versions", "1.1.0", "mines"),
+      );
+      assert.equal(yield* fs.readLink(externalCli), path.join(root, "unrelated", "mines"));
+      assert.equal(yield* fs.readFileString(regularCli), "user managed executable");
     }),
   );
 
@@ -313,6 +331,8 @@ if (context.update?.status === "pending") {
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-rollback-" });
       const statePath = path.join(root, "runtime", "service-state.json");
       const databasePath = path.join(root, "userdata", "state.sqlite");
+      const terminalCli = path.join(root, "bin", "mines");
+      const oldExecutable = path.join(root, "runtime", "versions", "1.0.0", "mines");
       const observationsPath = path.join(root, "environment-observations.jsonl");
       const envPath = path.join(root, SERVICE_ENV_FILE);
       yield* fs.writeFileString(envPath, "MINES_TEST_SERVICE_TOKEN=initial\n");
@@ -347,6 +367,9 @@ if (context.update?.status === "pending") {
           childSource,
         );
       }
+      yield* fs.makeDirectory(path.dirname(terminalCli));
+      yield* fs.symlink(oldExecutable, terminalCli);
+      yield* fs.writeFileString(path.join(root, "runtime", "launchers"), `${terminalCli}\n`);
       yield* Effect.promise(() =>
         writeServiceState(statePath, {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
@@ -364,6 +387,7 @@ if (context.update?.status === "pending") {
       const state = yield* Effect.promise(() => readServiceState(statePath));
       assert.equal(state.activeVersion, "1.0.0");
       assert.equal(state.update?.status, "rolled-back");
+      assert.equal(yield* fs.readLink(terminalCli), oldExecutable);
       assert.equal(
         state.update?.status === "rolled-back" ? state.update.reason : undefined,
         "invalid-prepared",

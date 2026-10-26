@@ -64,6 +64,38 @@ const runtimeSpawnArguments = (paths: ReturnType<typeof runtimePaths>) => ({
   args: ["serve"],
 });
 
+async function repointRecordedCliLaunchers(
+  baseDir: string,
+  fromVersion: string,
+  targetVersion: string,
+): Promise<void> {
+  const recorded = await NodeFSP.readFile(
+    NodePath.join(baseDir, "runtime", "launchers"),
+    "utf8",
+  ).catch((cause: unknown) => {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return "";
+    throw cause;
+  });
+  const previousExecutable = await NodeFSP.realpath(runtimePaths(baseDir, fromVersion).entryPath);
+  const nextExecutable = runtimePaths(baseDir, targetVersion).entryPath;
+  for (const launcher of new Set(recorded.split(/\r?\n/))) {
+    if (!NodePath.isAbsolute(launcher)) continue;
+    const link = await NodeFSP.readlink(launcher).catch(() => undefined);
+    if (link === undefined) continue;
+    const resolved = await NodeFSP.realpath(
+      NodePath.resolve(NodePath.dirname(launcher), link),
+    ).catch(() => undefined);
+    if (resolved !== previousExecutable) continue;
+    const temporary = `${launcher}.update-${NodeCrypto.randomUUID()}`;
+    try {
+      await NodeFSP.symlink(nextExecutable, temporary);
+      if ((await NodeFSP.readlink(launcher)) === link) await NodeFSP.rename(temporary, launcher);
+    } finally {
+      await NodeFSP.rm(temporary, { force: true });
+    }
+  }
+}
+
 const DB_FILE_SUFFIXES = ["", "-wal", "-shm"] as const;
 const RESTORE_MARKER = ".restore-pending";
 
@@ -725,6 +757,13 @@ export class Launcher {
     await writeServiceState(this.#statePath, next);
     this.#state = next;
     child.role = "active";
+    await repointRecordedCliLaunchers(
+      this.#baseDir,
+      pending.fromVersion,
+      pending.targetVersion,
+    ).catch(() =>
+      process.stderr.write("[service-launcher] Could not update a recorded Mines CLI link.\n"),
+    );
     await discardDatabaseBackup(this.#baseDir, committed.id).catch(() => undefined);
     await sendMessage(child.process, { type: "committed", updateId: committed.id });
   }

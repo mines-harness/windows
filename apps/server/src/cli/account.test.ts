@@ -62,3 +62,22 @@ it.effect("devices list asks for account sign-in without falling through to serv
     expect(yield* fs.exists(path.join(directory, "userdata", "server-runtime.json"))).toBe(false);
   }).pipe(Effect.scoped, Effect.provide(runtime)),
 );
+
+it.effect("device pairing commands require sign-in without starting a server", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    for (const command of [["pending"], ["approve", "ABCD-EFGH"], ["deny", "ABCD-EFGH"]]) {
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "mines-pairing-cli-" });
+      const failure = yield* Command.runWith(makeCli(), { version: "0.0.0" })([
+        "devices",
+        ...command,
+        "--base-dir",
+        directory,
+        "--json",
+      ]).pipe(Effect.flip);
+      expect(failure.message).toContain("Sign in first with `mines account login`");
+      expect(yield* fs.exists(path.join(directory, "userdata", "server-runtime.json"))).toBe(false);
+    }
+  }).pipe(Effect.scoped, Effect.provide(runtime)),
+);

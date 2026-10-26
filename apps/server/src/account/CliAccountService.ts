@@ -1,5 +1,10 @@
 import type { PeerDeviceStatus } from "@t3tools/contracts";
 import type { PeerDevice, PeerConnectionState } from "@t3tools/contracts/minesPeer";
+import {
+  DevicePairingCode,
+  type DevicePairingApproval,
+  type DevicePairingRequest,
+} from "@t3tools/contracts/minesDevicePairing";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -65,6 +70,11 @@ export class CliAccountService extends Context.Service<
     >;
     readonly devices: Effect.Effect<ReadonlyArray<AccountDevice>, CliAccountError>;
     readonly checkDevice: (deviceId: string) => Effect.Effect<PeerDeviceStatus, CliAccountError>;
+    readonly pendingPairings: Effect.Effect<ReadonlyArray<DevicePairingRequest>, CliAccountError>;
+    readonly approvePairing: (
+      code: string,
+    ) => Effect.Effect<DevicePairingApproval, CliAccountError>;
+    readonly denyPairing: (code: string) => Effect.Effect<void, CliAccountError>;
   }
 >()("mines/account/CliAccountService") {}
 
@@ -72,8 +82,18 @@ const error = (message: string) => new CliAccountError({ message });
 const storageError = () =>
   error("Cannot access the CLI account credential. Check permissions on the Mines data directory.");
 const hostError = (cause: LocalAccountHost.LocalAccountHostError) =>
-  error(cause.message + " Run `mines account login` again with the running host's --base-dir.");
+  error(
+    cause.pairingFailure
+      ? cause.message
+      : cause.message + " Run `mines account login` again with the running host's --base-dir.",
+  );
 const sessionError = () => error("Sign in first with `mines account login`.");
+const decodePairingCode = Schema.decodeUnknownEffect(DevicePairingCode);
+const pairingCode = Effect.fn("CliAccountService.decodePairingCode")((code: string) =>
+  decodePairingCode(code.replace(/[\s-]/g, "").toUpperCase()).pipe(
+    Effect.mapError(() => error("Enter the eight-character code shown on the device.")),
+  ),
+);
 
 export const layer = Layer.effect(
   CliAccountService,
@@ -108,6 +128,18 @@ export const layer = Layer.effect(
         .pipe(Effect.mapError((cause) => error(cause.message)));
       if (Option.isNone(user) || user.value.id !== saved.user.id) return yield* sessionError();
       return user.value;
+    });
+    const requireMatchingHost = Effect.fn("CliAccountService.requireMatchingHost")(function* () {
+      const saved = yield* savedSession();
+      yield* validate(saved);
+      const local = yield* host.state.pipe(Effect.mapError(hostError));
+      if (
+        local.connection.accountId !== saved.user.id ||
+        local.connection.controlUrl !== control.origin
+      )
+        return yield* error(
+          "Connect this host to your account with `mines account login` before managing device approvals.",
+        );
     });
     const configure = Effect.fn("CliAccountService.configure")(function* (saved: SavedAccount) {
       const configured = yield* host
@@ -256,6 +288,20 @@ export const layer = Layer.effect(
       status,
       logout,
       devices,
+      pendingPairings: Effect.gen(function* () {
+        yield* requireMatchingHost();
+        return yield* host.pendingPairings.pipe(Effect.mapError(hostError));
+      }),
+      approvePairing: Effect.fn("CliAccountService.approvePairing")(function* (code) {
+        yield* requireMatchingHost();
+        const value = yield* pairingCode(code);
+        return yield* host.approvePairing(value).pipe(Effect.mapError(hostError));
+      }),
+      denyPairing: Effect.fn("CliAccountService.denyPairing")(function* (code) {
+        yield* requireMatchingHost();
+        const value = yield* pairingCode(code);
+        yield* host.denyPairing(value).pipe(Effect.mapError(hostError));
+      }),
       checkDevice: Effect.fn("CliAccountService.checkDevice")(function* (deviceId) {
         const saved = yield* savedSession();
         yield* validate(saved);

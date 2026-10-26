@@ -526,6 +526,10 @@
     "./minesPush": {
       "types": "./src/minesPush.ts",
       "import": "./src/minesPush.ts"
+    },
+    "./minesDevicePairing": {
+      "types": "./src/minesDevicePairing.ts",
+      "import": "./src/minesDevicePairing.ts"
     }
   },
   "scripts": {
