@@ -33,6 +33,7 @@ import {
   UnsupportedDesktopBuildArchitectureError,
   MacWebAuthnSigningConfigurationResolutionError,
   packWindowsServerAsar,
+  preflightMacDesktopBuild,
   preflightWindowsDesktopBuild,
   renderMacWebAuthnEntitlements,
   resolveMacWebAuthnEntitlements,
@@ -48,6 +49,7 @@ import {
   verifyPackagedBundleIsSelfContained,
   WindowsPrimaryNativeProbeError,
   WindowsDesktopBuildPrerequisitesMissingError,
+  MacDesktopBuildPrerequisitesMissingError,
   WindowsPackagedPayloadValidationError,
   stageCursorSdkPlatformPackages,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
@@ -739,6 +741,67 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         );
       }),
     ),
+  );
+
+  it.effect("accepts Apple lipo without a version flag for universal builds", () =>
+    Effect.gen(function* () {
+      const spawner = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const child = command as unknown as {
+            readonly command: string;
+            readonly args: ReadonlyArray<string>;
+          };
+          const unsupportedVersionFlag =
+            child.command === "lipo" && child.args.includes("-version");
+          return Effect.succeed(mockProcess(unsupportedVersionFlag ? 1 : 0));
+        }),
+      );
+      yield* preflightMacDesktopBuild("universal").pipe(
+        Effect.provide(
+          Layer.merge(
+            spawner,
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: { MINES_DESKTOP_REUSE_RESOURCE_MONITOR: "true" },
+              }),
+            ),
+          ),
+        ),
+      );
+    }),
+  );
+
+  it.effect("reports missing lipo before a universal build", () =>
+    Effect.gen(function* () {
+      const spawner = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const child = command as unknown as {
+            readonly command: string;
+            readonly args: ReadonlyArray<string>;
+          };
+          const needsLipo =
+            child.command === "lipo" || (child.command === "xcrun" && child.args.includes("lipo"));
+          return Effect.succeed(mockProcess(needsLipo ? 1 : 0));
+        }),
+      );
+      const error = yield* preflightMacDesktopBuild("universal").pipe(
+        Effect.provide(
+          Layer.merge(
+            spawner,
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: { MINES_DESKTOP_REUSE_RESOURCE_MONITOR: "true" },
+              }),
+            ),
+          ),
+        ),
+        Effect.flip,
+      );
+      assert.instanceOf(error, MacDesktopBuildPrerequisitesMissingError);
+      assert.deepStrictEqual(error.missing, ["lipo"]);
+    }),
   );
 
   it.effect("reports missing Windows toolchain capabilities before building", () =>
