@@ -32,7 +32,7 @@ export class RepositoryIdentityResolver extends Context.Service<
   {
     readonly resolve: (
       cwd: string,
-      options?: { readonly refresh?: boolean },
+      options?: { readonly refresh?: boolean; readonly purpose?: "pull-requests" },
     ) => Effect.Effect<RepositoryIdentity | null>;
   }
 >()("mines/project/RepositoryIdentityResolver") {}
@@ -137,6 +137,13 @@ class RepositoryIdentityCacheKey extends Data.Class<{
   readonly isBare: boolean;
 }> {}
 
+class PullRequestRepositoryCacheKey extends Data.Class<{
+  readonly rootPath: string;
+  readonly remoteName: string;
+  readonly remoteUrl: string;
+  readonly originUrl: string | undefined;
+}> {}
+
 const resolveRepositoryIdentityCacheKey = Effect.fn("RepositoryIdentityResolver.resolveCacheKey")(
   function* (cwd: string) {
     const processRunner = yield* ProcessRunner.ProcessRunner;
@@ -222,6 +229,70 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
     : null;
 });
 
+const resolvePullRequestRepositoryCacheKey = Effect.fn(
+  "RepositoryIdentityResolver.resolvePullRequestCacheKey",
+)(function* (cacheKey: RepositoryIdentityCacheKey) {
+  const processRunner = yield* ProcessRunner.ProcessRunner;
+  const env = explicitBareRepositoryEnv(process.env, yield* HostProcess.Platform);
+  const read = (args: readonly string[]) =>
+    processRunner
+      .run({
+        command: "git",
+        args: ["-C", cacheKey.rootPath, ...(cacheKey.isBare ? ["--git-dir=."] : []), ...args],
+        env,
+        timeoutBehavior: "timedOutResult",
+      })
+      .pipe(
+        Effect.map((result) => (result.code === 0 && !result.timedOut ? result.stdout : "")),
+        Effect.orElseSucceed(() => ""),
+      );
+  const [remoteOutput, branchOutput, configOutput] = yield* Effect.all(
+    [
+      read(["remote", "-v"]),
+      read(["symbolic-ref", "--quiet", "--short", "HEAD"]),
+      read(["config", "--get-regexp", "^(branch\\..*\\.remote|remote\\..*\\.gh-resolved)$"]),
+    ],
+    { concurrency: "unbounded" },
+  );
+  const remotes = parseRemoteFetchUrls(remoteOutput);
+  const config = new Map(
+    configOutput
+      .split("\n")
+      .map((line) => /^(\S+)\s+(.*)$/.exec(line))
+      .filter((match): match is RegExpExecArray => match !== null)
+      .map((match) => [match[1]!, match[2]!.trim()]),
+  );
+  const marked = [...remotes.keys()].filter((name) => config.has(`remote.${name}.gh-resolved`));
+  const tracked = config.get(`branch.${branchOutput.trim()}.remote`);
+  let selected = marked.length === 0 ? tracked : undefined;
+  if (marked.length === 1) {
+    const name = marked[0]!;
+    const selector = config.get(`remote.${name}.gh-resolved`)!;
+    if (selector === "base") selected = name;
+    else {
+      const host = sourceControlDefinitions
+        .repositoryKeyFromRemote(remotes.get(name)!)
+        .split("/")[0];
+      const key = `${host}/${selector.toLowerCase()}`;
+      selected = [...remotes].find(
+        ([, url]) => sourceControlDefinitions.repositoryKeyFromRemote(url) === key,
+      )?.[0];
+    }
+  }
+  const selectedUrl = selected === undefined ? undefined : remotes.get(selected);
+  const remote =
+    selected !== undefined && selectedUrl !== undefined
+      ? { remoteName: selected, remoteUrl: selectedUrl }
+      : pickPrimaryRemote(remotes);
+  return remote
+    ? new PullRequestRepositoryCacheKey({
+        ...remote,
+        rootPath: cacheKey.rootPath,
+        originUrl: remotes.get("origin"),
+      })
+    : null;
+});
+
 export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   options: RepositoryIdentityResolverOptions = {},
 ) {
@@ -260,11 +331,30 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
     { capacity: cacheCapacity, timeToLive },
   );
 
+  const pullRequestIdentityCache = yield* Cache.makeWith<
+    PullRequestRepositoryCacheKey,
+    RepositoryIdentity
+  >(
+    (cacheKey) => {
+      const identity = buildRepositoryIdentity(cacheKey);
+      return refine(identity).pipe(Effect.orElseSucceed(() => identity));
+    },
+    { capacity: cacheCapacity, timeToLive },
+  );
+
   const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fnUntraced(
     function* (cwd, options) {
       if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
       const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
       if (cacheKey === null) return null;
+      if (options?.purpose === "pull-requests") {
+        const pullRequestKey = yield* resolvePullRequestRepositoryCacheKey(cacheKey).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        );
+        if (pullRequestKey === null) return null;
+        if (options.refresh) yield* Cache.invalidate(pullRequestIdentityCache, pullRequestKey);
+        return yield* Cache.get(pullRequestIdentityCache, pullRequestKey);
+      }
       if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);
       return yield* Cache.get(repositoryIdentityCache, cacheKey);
     },

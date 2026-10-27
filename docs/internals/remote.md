@@ -12,10 +12,13 @@ An environment keeps its ID across server restarts and endpoint changes. Saved
 connections are local to a client profile; the server's identity and state are
 not. A repository identity can correlate clones across environments, but never
 routes work between them. A project and its threads belong to one environment.
-The canonical key follows the `upstream` remote when one exists, so pull request
-features target the repository a fork tracks. A fork also reports its own
-`origin`, and clients group and label by that, so a fork never collapses into a
-checkout of its upstream.
+The canonical key follows the `upstream` remote when one exists. A fork also
+reports its own `origin`, and clients group and label by that, so a fork never
+collapses into a checkout of its upstream. Pull request browsing resolves its
+repository separately: an explicit GitHub base remote takes precedence, then
+the checkout's tracked remote, with canonical selection as the fallback. Do not
+reuse a stored canonical identity as the current PR target; a product fork may
+retain its original upstream while tracking and reviewing its own repository.
 
 [Environment ID initialization](../../apps/server/src/environment/ServerEnvironment.ts)
 must publish a complete ID atomically. Repair of an empty ID file retains a

@@ -16,6 +16,8 @@ import {
   peerClientApproval,
 } from "../../connection/peerOnboarding";
 import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
+import { environmentIdsKey } from "../../state/environmentAtomList";
+import { environmentUpdateStatesAtom } from "../../state/server";
 import { environmentPeerDevicesAtom } from "../../state/environmentPeerDevices";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
@@ -131,6 +133,16 @@ function AccountDevicesContent() {
   const { environments } = useEnvironments();
   const directory = useAccountPeerDirectory();
   const environmentDevices = useAtomValue(environmentPeerDevicesAtom);
+  const updateStates = useAtomValue(
+    environmentUpdateStatesAtom(
+      environmentIdsKey(environments.map((environment) => environment.environmentId)),
+    ),
+  );
+  const updatingEnvironmentIds = new Set(
+    environments.flatMap((environment, index) =>
+      updateStates[index]?.status === "running" ? [environment.environmentId] : [],
+    ),
+  );
   const approval = useAtomCommand(peerClientApproval, { reportFailure: false });
   const begin = useAtomCommand(beginPeerPairing, { reportFailure: false });
   const collect = useAtomCommand(collectPeerPairing, { reportFailure: false });
@@ -250,7 +262,7 @@ function AccountDevicesContent() {
     await cancel({ accountId: auth.userId, requestId: request.id });
   };
   const reconnect = async (row: DeviceListRow) => {
-    if (!row.environmentId || busy) return;
+    if (!row.environmentId || busy || updatingEnvironmentIds.has(row.environmentId)) return;
     setBusy(row.id);
     setError(null);
     const result = await retry(row.environmentId);
@@ -360,7 +372,9 @@ function AccountDevicesContent() {
                 control={
                   <div className="flex flex-wrap gap-2">
                     {environment ? <DeviceCliUpdateAction environment={environment} /> : null}
-                    {row.status === "connected" && row.environmentId ? (
+                    {row.environmentId &&
+                    updatingEnvironmentIds.has(row.environmentId) ? null : row.status ===
+                        "connected" && row.environmentId ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -400,7 +414,7 @@ function AccountDevicesContent() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        disabled={busy !== null}
+                        disabled={busy !== null || updatingEnvironmentIds.has(row.environmentId)}
                         onClick={() => void remove(row)}
                       >
                         Forget

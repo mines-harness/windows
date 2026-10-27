@@ -66,7 +66,6 @@ export function reconcileCatalogHostItems(
   },
 ) {
   const snapshot = catalog.getSnapshot();
-  const existing = new Map(snapshot.entities.map((entity) => [entity.id, entity]));
   const hidden = hiddenCatalogExecutionProjects(snapshot);
   const placements = catalogEntries(snapshot);
   const threads = input.threads.filter(
@@ -84,7 +83,7 @@ export function reconcileCatalogHostItems(
         hidden.has(id)
       )
         continue;
-      const current = existing.get(id);
+      const current = catalog.getEntity(id);
       catalog.upsert({
         ...current,
         id,
@@ -96,7 +95,7 @@ export function reconcileCatalogHostItems(
     for (const thread of threads) {
       const id = catalogHostId("thread", thread.environmentId, thread.id);
       const first = !catalog.has(id);
-      const current = existing.get(id);
+      const current = catalog.getEntity(id);
       const projectId = catalogHostId("project", thread.environmentId, thread.projectId);
       const entity = {
         ...current,
@@ -111,7 +110,12 @@ export function reconcileCatalogHostItems(
           : null;
       catalog.upsert(entity, { parentId });
       if (!placements.has(id) && catalog.has(id))
-        placements.set(id, { entity, parentId, children: [], orphaned: false });
+        placements.set(id, {
+          entity,
+          parentId: catalog.getParentId(id),
+          children: [],
+          orphaned: false,
+        });
       if (first && catalog.has(id) && thread.pinnedAt != null) catalog.pin(id);
     }
     for (const thread of threads) {
@@ -121,7 +125,7 @@ export function reconcileCatalogHostItems(
       const parentId = catalogHostId("thread", thread.environmentId, thread.lineage.parentThreadId);
       if (!catalog.has(id) || !catalog.has(parentId)) continue;
       const automaticProject = catalogHostId("project", thread.environmentId, thread.projectId);
-      const sourceProject = existing.get(id)?.importSource?.sourceProject;
+      const sourceProject = catalog.getEntity(id)?.importSource?.sourceProject;
       const automaticSourceProject = sourceProject
         ? `imported-project:${JSON.stringify([thread.environmentId, sourceProject.id])}`
         : undefined;

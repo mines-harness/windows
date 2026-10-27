@@ -3,8 +3,10 @@ import { AuthSessionState, type EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
+import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render, type Screen } from "../../test/render";
 
@@ -58,11 +60,36 @@ vi.mock(import("./ui/toast"), async (original) => {
 
 import { resetConfirmDialogForTests } from "~/confirmDialog";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { serverEnvironment } from "~/state/server";
+import type { EnvironmentPresentation } from "~/state/environments";
+import { DeviceCliUpdateAction } from "./settings/DeviceCliUpdateAction";
 import {
   ServerUpdateAction,
   ServerUpdatesAction,
+  ServerVersionInfo,
   type ServerUpdateTarget,
 } from "./ServerUpdateAction";
+
+describe("ServerVersionInfo", () => {
+  it("opens the installed version on hover", async () => {
+    await using screen = await render(<ServerVersionInfo version="0.1.1245" serverLabel="mind" />);
+    await userEvent.hover(screen.getByRole("button", { name: "Version information for mind" }));
+    await expect.element(page.getByRole("tooltip")).toBeVisible();
+    await expect.element(page.getByText("L'appareil est à jour", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("v0.1.1245", { exact: true })).toBeVisible();
+  });
+
+  it("opens on click and follows the actual version after an update", async () => {
+    await using screen = await render(<ServerVersionInfo version="0.1.1245" serverLabel="mind" />);
+    await click(screen);
+    await expect.element(page.getByRole("tooltip")).toBeVisible();
+    await expect.element(page.getByText("v0.1.1245", { exact: true })).toBeVisible();
+    await screen.rerender(<ServerVersionInfo version="0.1.1246" serverLabel="mind" />);
+    await expect.element(page.getByText("v0.1.1246", { exact: true })).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(page.getByRole("tooltip")).not.toBeInTheDocument();
+  });
+});
 
 const decodeSessionState = Schema.decodeUnknownSync(AuthSessionState);
 
@@ -130,6 +157,55 @@ function renderAction(props: Partial<Parameters<typeof ServerUpdateAction>[0]> =
     />,
   );
 }
+
+function deviceElement(version: string | null) {
+  const environment = {
+    environmentId: "env-device" as EnvironmentId,
+    label: "mind",
+    entry: { target: { _tag: "SshConnectionTarget" } },
+    connection: { phase: version === null ? "offline" : "connected" },
+    serverConfig:
+      version === null
+        ? null
+        : {
+            environment: {
+              serverVersion: version,
+              capabilities: { serverSelfUpdate: "boot-service" },
+            },
+          },
+  } as unknown as EnvironmentPresentation;
+  return (
+    <RegistryContext.Provider value={appAtomRegistry}>
+      <DeviceCliUpdateAction environment={environment} targetVersion="0.1.1246" />
+    </RegistryContext.Provider>
+  );
+}
+
+describe("DeviceCliUpdateAction recovery", () => {
+  it.each([
+    { version: "0.1.1245", buttonName: "Update CLI for mind" },
+    { version: "0.1.1246", buttonName: "Version information for mind" },
+  ])(
+    "restores $buttonName after reconnecting with a failed update",
+    async ({ version, buttonName }) => {
+      using _state = setup();
+      const updateState = Atom.make<ServerUpdateState>({
+        status: "failed",
+        stage: "resuming",
+        fromVersion: "0.1.1245",
+        targetVersion: "0.1.1246",
+        message: "Connection interrupted during update.",
+      });
+      using _updateState = vi
+        .spyOn(serverEnvironment, "updateStateAtom")
+        .mockReturnValue(updateState);
+      await using screen = await render(deviceElement(null));
+      await expect.element(screen.getByRole("alert")).toBeVisible();
+      await screen.rerender(deviceElement(version));
+      await expect.element(screen.getByRole("button", { name: buttonName })).toBeEnabled();
+    },
+  );
+});
 
 describe("ServerUpdateAction", () => {
   it.each([

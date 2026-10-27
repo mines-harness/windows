@@ -829,11 +829,14 @@ export const make = Effect.gen(function* () {
         Effect.forEach(
           projects,
           (project) =>
-            project.repositoryIdentity != null
-              ? Effect.succeed(project)
-              : repositoryIdentities
-                  .resolve(project.workspaceRoot)
-                  .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity }))),
+            repositoryIdentities.resolve(project.workspaceRoot, { purpose: "pull-requests" }).pipe(
+              Effect.map((repositoryIdentity) => ({
+                ...project,
+                // Persisted canonical identities can still name a fork's upstream.
+                // Keep that identity only when the checkout is currently unavailable.
+                repositoryIdentity: repositoryIdentity ?? project.repositoryIdentity,
+              })),
+            ),
           { concurrency: REPOSITORY_CONCURRENCY },
         ),
       ),

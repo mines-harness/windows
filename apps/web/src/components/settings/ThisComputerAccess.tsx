@@ -3,6 +3,7 @@ import {
   AuthStandardClientScopes,
   type EnvironmentId,
 } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
@@ -19,6 +20,7 @@ import {
   peerRevoke,
   peerState,
 } from "../../state/peers";
+import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -71,6 +73,8 @@ function ThisComputerAccessContent({
   const trust = useEnvironmentQuery(peerState({ environmentId, input: {} }));
   const connection = useEnvironmentQuery(peerConnectionState({ environmentId, input: {} }));
   const configured = connection.data?.configured === true;
+  const updating =
+    useAtomValue(serverEnvironment.updateStateAtom(environmentId)).status === "running";
   const currentAccount = useRef(userId);
   useEffect(() => {
     currentAccount.current = userId;
@@ -208,7 +212,9 @@ function ThisComputerAccessContent({
         : configured
           ? connection.data?.online
             ? "Ready for connections. Keep this computer awake to use it remotely."
-            : "Connection interrupted. Reconnect to make this computer available again."
+            : updating
+              ? "Updating this computer…"
+              : "Connection interrupted. Reconnect to make this computer available again."
           : "Off. Your work on this computer continues normally.";
 
   return (
@@ -251,7 +257,7 @@ function ThisComputerAccessContent({
             </Button>
           }
         />
-      ) : configured && !connection.data?.online ? (
+      ) : configured && !connection.data?.online && !updating ? (
         <SettingsRow
           title="Make this computer available"
           control={
@@ -312,7 +318,8 @@ function ThisComputerAccessContent({
       {configured &&
       approved.length === 0 &&
       pending.length === 0 &&
-      !requests.isPending &&
+      requests.data !== null &&
+      trust.data !== null &&
       !requests.error &&
       !trust.error ? (
         <p className="px-3 py-3 text-sm text-muted-foreground sm:px-4">

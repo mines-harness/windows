@@ -1,26 +1,10 @@
-import {
-  catalogHostId,
-  type MinesCatalog,
-  type MinesCatalogEntry,
-} from "@t3tools/client-runtime/catalog";
+import { catalogHostId, type MinesCatalog } from "@t3tools/client-runtime/catalog";
 import {
   isAgentSessionGeneratedContextTitle,
   type AgentSessionImportResult,
   type AgentSessionSourceSection,
   type AgentSessionSourceProject,
 } from "@t3tools/contracts";
-
-function findEntry(
-  entries: readonly MinesCatalogEntry[],
-  id: string,
-): MinesCatalogEntry | undefined {
-  for (const entry of entries) {
-    if (entry.entity.id === id) return entry;
-    const found = findEntry(entry.children, id);
-    if (found) return found;
-  }
-  return undefined;
-}
 
 export function applyImportedCatalog(
   catalog: MinesCatalog,
@@ -34,7 +18,6 @@ export function applyImportedCatalog(
   threads: NonNullable<AgentSessionImportResult["catalogThreads"]> = [],
 ) {
   const projectId = catalogHostId("project", input.environmentId, input.projectId);
-  const initialRoots = catalog.getSnapshot().roots;
   const executionOnly =
     input.sourceProject !== undefined ||
     (threads.length > 0 && threads.every((thread) => thread.sourceProject !== undefined));
@@ -47,8 +30,18 @@ export function applyImportedCatalog(
     thread.sourceProject === undefined ? input.sourceProject : thread.sourceProject;
   const sourceProjectId = (source: AgentSessionSourceProject) =>
     `imported-project:${JSON.stringify([input.environmentId, source.id])}`;
+  const initialParents = new Map<string, string | null>();
+  const rememberParent = (id: string) => {
+    if (catalog.has(id)) initialParents.set(id, catalog.getParentId(id));
+  };
+  rememberParent(projectId);
+  for (const thread of threads) {
+    rememberParent(catalogHostId("thread", input.environmentId, thread.threadId));
+    const sourceProject = sourceProjectFor(thread);
+    if (sourceProject) rememberParent(sourceProjectId(sourceProject));
+  }
   catalog.transaction(() => {
-    const previous = findEntry(initialRoots, projectId)?.entity;
+    const previous = catalog.getEntity(projectId);
     catalog.upsert({
       ...previous,
       id: projectId,
@@ -56,18 +49,23 @@ export function applyImportedCatalog(
       title: previous?.title ?? input.title,
       hostRef: { environmentId: input.environmentId, entityId: input.projectId },
       ...(executionOnly
-        ? { importSource: { executionProjectId: input.projectId, sourceProject: null } }
+        ? {
+            importSource: {
+              ...previous?.importSource,
+              executionProjectId: input.projectId,
+              sourceProject: null,
+            },
+          }
         : {}),
     });
     if (!executionOnly && input.sourceSection && catalog.has(projectId)) {
       const destination = sectionId(input.sourceSection);
-      const existing = findEntry(initialRoots, projectId);
-      if (destination !== null && (!existing || existing.parentId === null))
+      if (destination !== null && initialParents.get(projectId) == null)
         catalog.move(projectId, destination);
     }
     for (const thread of threads) {
       const id = catalogHostId("thread", input.environmentId, thread.threadId);
-      const current = findEntry(initialRoots, id)?.entity;
+      const current = catalog.getEntity(id);
       const {
         threadId: _id,
         title: _title,
@@ -98,25 +96,28 @@ export function applyImportedCatalog(
       });
       if (sourceProject) {
         const logicalId = sourceProjectId(sourceProject);
-        const existing = findEntry(initialRoots, logicalId)?.entity;
+        const existing = catalog.getEntity(logicalId);
         catalog.upsert({
           ...existing,
           id: logicalId,
           kind: "project",
           title: existing?.title ?? sourceProject.title,
           hostRef: { environmentId: input.environmentId, entityId: input.projectId },
-          importSource: { executionProjectId: input.projectId, sourceProject },
+          importSource: {
+            ...existing?.importSource,
+            executionProjectId: input.projectId,
+            sourceProject,
+          },
         });
       }
     }
   });
-  // Placement reads the committed snapshot so children may precede their parents in an import page.
-  const roots = catalog.getSnapshot().roots;
+  // Register all parents before placement because import pages may list children first.
   catalog.transaction(() => {
     for (const thread of threads) {
       const id = catalogHostId("thread", input.environmentId, thread.threadId);
       if (!catalog.has(id)) continue;
-      const existing = findEntry(initialRoots, id);
+      const initialParent = initialParents.get(id);
       const sourceProject = sourceProjectFor(thread);
       const sourceSection =
         thread.sourceSection ?? (sourceProject !== undefined ? input.sourceSection : undefined);
@@ -125,8 +126,7 @@ export function applyImportedCatalog(
       if (sourceProject) {
         const logical = sourceProjectId(sourceProject);
         if (catalog.has(logical)) {
-          const placed = findEntry(roots, logical);
-          if (section !== null && (!findEntry(initialRoots, logical) || placed?.parentId === null))
+          if (section !== null && initialParents.get(logical) == null)
             catalog.move(logical, section);
           destination = logical;
         }
@@ -140,11 +140,10 @@ export function applyImportedCatalog(
         ? `imported-section:${JSON.stringify([input.environmentId, sourceSection.id])}`
         : null;
       const automatic =
-        !existing ||
-        existing.parentId === null ||
-        existing.parentId === projectId ||
-        (sourceProject != null && existing.parentId === sourceProjectId(sourceProject)) ||
-        (oldSection !== null && existing.parentId === oldSection);
+        initialParent == null ||
+        initialParent === projectId ||
+        (sourceProject != null && initialParent === sourceProjectId(sourceProject)) ||
+        (oldSection !== null && initialParent === oldSection);
       if (automatic && (destination === null || catalog.has(destination)))
         catalog.move(id, destination);
     }

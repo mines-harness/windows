@@ -109,6 +109,58 @@ it("keeps explicit source projects under their real section and preserves a manu
   );
 });
 
+it("preserves hidden imported titles, metadata, manual placements and pins through reimport and restore", () => {
+  const catalog = new MinesCatalog();
+  const sourceProject = { id: "native-project", title: "Source project" };
+  const root = ThreadId.make("import:codex:root");
+  const child = ThreadId.make("import:codex:child");
+  const imported = [
+    { threadId: child, title: "Child", kind: "subagent" as const, parentThreadId: root },
+    { threadId: root, title: "Root", kind: "thread" as const },
+  ];
+  applyImportedCatalog(catalog, { ...input, sourceProject }, imported);
+  const manual = catalog.createSection("My organization");
+  const executionId = catalogHostId("project", input.environmentId, input.projectId);
+  const logicalId = `imported-project:${JSON.stringify([input.environmentId, sourceProject.id])}`;
+  const rootId = catalogHostId("thread", input.environmentId, root);
+  const childId = catalogHostId("thread", input.environmentId, child);
+  catalog.upsert(
+    { id: "manual-project", kind: "project", title: "Hand-picked mines" },
+    {
+      parentId: manual,
+    },
+  );
+  catalog.move(executionId, manual);
+  catalog.move(logicalId, manual);
+  catalog.move(childId, "manual-project");
+  for (const [id, title] of [
+    [executionId, "My execution project"],
+    [logicalId, "My source project"],
+    [rootId, "My root mine"],
+    [childId, "My agent mine"],
+  ]) {
+    const entity = catalog.getEntity(id!)!;
+    catalog.upsert({
+      ...entity,
+      title: title!,
+      importSource: { ...entity.importSource!, agentName: "Remembered source metadata" },
+    });
+    catalog.pin(id!);
+  }
+  catalog.setContextInstructions(logicalId, "Keep the source instructions");
+  const before = catalog.getSnapshot();
+  catalog.archiveSection(manual, { includeContents: true });
+
+  const reloaded = new MinesCatalog();
+  reloaded.applyUpdate(catalog.encodeUpdate());
+  applyImportedCatalog(reloaded, { ...input, sourceProject }, imported);
+  reloaded.restoreSection(manual);
+
+  expect(reloaded.getSnapshot().roots).toEqual(before.roots);
+  expect(reloaded.getSnapshot().pins).toEqual(before.pins);
+  expect(reloaded.getSnapshot().contexts).toEqual(before.contexts);
+});
+
 it("binds legacy completed imports only on explicit refresh and persists their newly discovered project section", async () => {
   const catalog = new MinesCatalog();
   const project = catalogHostId("project", "mac", "project");

@@ -369,6 +369,64 @@ function batchedChangeRequest(number: number, repository: string, updatedAt: str
   return { ...changeRequest(number, updatedAt), repository };
 }
 
+it.effect("uses the checkout PR remote instead of a cached upstream identity", () =>
+  Effect.gen(function* () {
+    const stored = project({
+      id: "mines",
+      title: "Mines",
+      workspaceRoot: "/mines",
+      repository: "pingdotgg/t3code",
+    });
+    const own = project({
+      id: "mines",
+      title: "Mines",
+      workspaceRoot: "/mines",
+      repository: "mines-harness/macos",
+    });
+    let selected = own.repositoryIdentity ?? null;
+    const listed: string[] = [];
+    const resolved: unknown[] = [];
+    const service = yield* makeService({
+      projects: [stored],
+      resolveRepositoryIdentity: (cwd, options) => {
+        resolved.push([cwd, options]);
+        return Effect.succeed(selected);
+      },
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+          listChangeRequests: ({ repository }) => {
+            listed.push(repository);
+            return Effect.succeed({
+              items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+              truncated: false,
+              continues: false,
+            });
+          },
+        }),
+      ],
+    });
+
+    const result = yield* service.list({ state: "open" });
+    assert.deepStrictEqual(listed, ["mines-harness/macos"]);
+    assert.strictEqual(result.entries[0]?.repository, "mines-harness/macos");
+    assert.deepStrictEqual(resolved, [["/mines", { purpose: "pull-requests" }]]);
+    assert.strictEqual(stored.repositoryIdentity?.canonicalKey, "github.com/pingdotgg/t3code");
+
+    // An explicit switch back to the upstream remains a legitimate project choice.
+    selected = stored.repositoryIdentity ?? null;
+    yield* service.invalidate({});
+    const upstream = yield* service.list({ state: "open" });
+    assert.deepStrictEqual(listed, ["mines-harness/macos", "pingdotgg/t3code"]);
+    assert.strictEqual(upstream.entries[0]?.repository, "pingdotgg/t3code");
+
+    // Disconnected workspaces retain their last known project identity.
+    selected = null;
+    yield* service.invalidate({});
+    const offline = yield* service.list({ state: "open" });
+    assert.strictEqual(offline.entries[0]?.repository, "pingdotgg/t3code");
+  }),
+);
+
 it.effect("reads nothing from a host with no implementation, but reports it", () =>
   Effect.gen(function* () {
     const listed: string[] = [];

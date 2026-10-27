@@ -33,6 +33,7 @@ import {
   UnsupportedDesktopBuildArchitectureError,
   MacWebAuthnSigningConfigurationResolutionError,
   packWindowsServerAsar,
+  preflightMacDesktopBuild,
   preflightWindowsDesktopBuild,
   renderMacWebAuthnEntitlements,
   resolveMacWebAuthnEntitlements,
@@ -48,6 +49,7 @@ import {
   verifyPackagedBundleIsSelfContained,
   WindowsPrimaryNativeProbeError,
   WindowsDesktopBuildPrerequisitesMissingError,
+  MacDesktopBuildPrerequisitesMissingError,
   WindowsPackagedPayloadValidationError,
   stageCursorSdkPlatformPackages,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
@@ -487,6 +489,63 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }),
   );
 
+  it.effect(
+    "keeps architecture-tagged prebuilds while still requiring ordinary natives to merge",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* createBuildConfig(
+          "mac",
+          "dmg",
+          "1.2.3",
+          false,
+          false,
+          undefined,
+          undefined,
+          false,
+          "universal",
+        );
+        const rule = (config.mac as { x64ArchFiles?: string }).x64ArchFiles;
+        assert.isString(rule);
+        const resources = "Contents/Resources/";
+        const modules = `${resources}app.asar.unpacked/node_modules/`;
+        for (const architecture of ["arm64", "x64"]) {
+          const prebuilds = [
+            `@crowecawcaw/xa11y-darwin-${architecture}/xa11y.darwin-${architecture}.node`,
+            `@ff-labs/fff-bin-darwin-${architecture}/libfff_c.dylib`,
+            `@napi-rs/keyring/keyring.darwin-${architecture}.node`,
+            `@napi-rs/keyring-darwin-${architecture}/keyring.darwin-${architecture}.node`,
+            `@node-datachannel/darwin-${architecture}/node_datachannel.node`,
+            `@yuuang/ffi-rs-darwin-${architecture}/ffi-rs.darwin-${architecture}.node`,
+            `node-pty/prebuilds/darwin-${architecture}/pty.node`,
+            `node-pty/prebuilds/darwin-${architecture}/spawn-helper`,
+            `objc-js/prebuilds/darwin-${architecture}/${architecture === "arm64" ? "node.napi.armv8.node" : "node.napi.node"}`,
+          ];
+          for (const relative of prebuilds)
+            assert.isTrue(NodePath.matchesGlob(`${modules}${relative}`, rule as string), relative);
+          for (const relative of [
+            "bin/cursorsandbox",
+            "bin/rg",
+            "vendor/tree-sitter/binding.node",
+            "vendor/tree-sitter-bash/binding.node",
+          ])
+            assert.isTrue(
+              NodePath.matchesGlob(
+                `${resources}node_modules/@cursor/sdk-darwin-${architecture}/${relative}`,
+                rule as string,
+              ),
+              relative,
+            );
+        }
+        for (const relative of [
+          "Contents/MacOS/mines (Beta)",
+          "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+          `${modules}node-pty/build/Release/pty.node`,
+          `${modules}unknown/addon.node`,
+        ])
+          assert.isFalse(NodePath.matchesGlob(relative, rule as string), relative);
+      }),
+  );
+
   it.effect("omits update feeds for pull request preview builds", () =>
     Effect.gen(function* () {
       const preview = yield* createBuildConfig(
@@ -739,6 +798,67 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         );
       }),
     ),
+  );
+
+  it.effect("accepts Apple lipo without a version flag for universal builds", () =>
+    Effect.gen(function* () {
+      const spawner = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const child = command as unknown as {
+            readonly command: string;
+            readonly args: ReadonlyArray<string>;
+          };
+          const unsupportedVersionFlag =
+            child.command === "lipo" && child.args.includes("-version");
+          return Effect.succeed(mockProcess(unsupportedVersionFlag ? 1 : 0));
+        }),
+      );
+      yield* preflightMacDesktopBuild("universal").pipe(
+        Effect.provide(
+          Layer.merge(
+            spawner,
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: { MINES_DESKTOP_REUSE_RESOURCE_MONITOR: "true" },
+              }),
+            ),
+          ),
+        ),
+      );
+    }),
+  );
+
+  it.effect("reports missing lipo before a universal build", () =>
+    Effect.gen(function* () {
+      const spawner = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make((command) => {
+          const child = command as unknown as {
+            readonly command: string;
+            readonly args: ReadonlyArray<string>;
+          };
+          const needsLipo =
+            child.command === "lipo" || (child.command === "xcrun" && child.args.includes("lipo"));
+          return Effect.succeed(mockProcess(needsLipo ? 1 : 0));
+        }),
+      );
+      const error = yield* preflightMacDesktopBuild("universal").pipe(
+        Effect.provide(
+          Layer.merge(
+            spawner,
+            ConfigProvider.layer(
+              ConfigProvider.fromEnv({
+                env: { MINES_DESKTOP_REUSE_RESOURCE_MONITOR: "true" },
+              }),
+            ),
+          ),
+        ),
+        Effect.flip,
+      );
+      assert.instanceOf(error, MacDesktopBuildPrerequisitesMissingError);
+      assert.deepStrictEqual(error.missing, ["lipo"]);
+    }),
   );
 
   it.effect("reports missing Windows toolchain capabilities before building", () =>

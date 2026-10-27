@@ -2,8 +2,10 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   hiddenCatalogExecutionProjects,
   minesAccountEnvironmentIdsAtom,
+  minesAccountIdAtom,
   reconcileCatalogHostItems,
 } from "@t3tools/client-runtime/catalog";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { CloudCatalogDevices } from "../cloud/CloudCatalogDevices";
 import { CatalogLocalSync } from "../../catalog/CatalogLocalSync";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -35,11 +37,17 @@ import {
   type MinesCatalogEntry,
 } from "@t3tools/client-runtime/catalog";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentId, ProjectId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type ProjectId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useEnvironmentQuery } from "../../state/query";
 import { groupList } from "../../state/groups";
+import { threadEnvironment } from "../../state/threads";
+import { liveShellEnvironmentIdsAtom } from "../../state/shell";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { refreshArchivedThreadsForEnvironment } from "../../lib/archivedThreadsState";
 import type { MinesCatalog } from "@t3tools/client-runtime/catalog";
 import { useMinesCatalog } from "../../catalog/useMinesCatalog";
 import { useProjects, useQuietThreadShells, useServerConfigs } from "../../state/entities";
@@ -61,6 +69,8 @@ import {
   DialogFooter,
 } from "../ui/dialog";
 import {
+  Menu,
+  MenuPopup,
   MenuTrigger,
   MenuItem,
   MenuSeparator,
@@ -80,8 +90,19 @@ import { CatalogRowMenu } from "./CatalogRowMenu";
 import { canTransferMineAtom } from "../chat/mineTransferAvailability";
 import { openMineTransferDialog } from "../chat/mineTransferDialogState";
 import { GroupMembershipIndicator } from "../groups/GroupMembershipIndicator";
-import { useContactGroups, useContactInvitationCount } from "../contacts/ContactsProvider";
-import { isCatalogLibraryEntryVisible } from "./MinesCatalogTree.logic";
+import { useContactGroupsSnapshot, useContactInvitationCount } from "../contacts/ContactsProvider";
+import {
+  catalogWorkgroupEntries,
+  catalogWorkgroupId,
+  catalogWorkgroupKey,
+  isCatalogLibraryEntryVisible,
+} from "./MinesCatalogTree.logic";
+import { CatalogSectionArchiveDialog } from "./CatalogSectionArchiveDialog";
+import {
+  archiveCatalogSection,
+  relatedSectionThreads,
+  restoreCatalogSection,
+} from "./sectionArchive";
 
 const ThreadRelationshipsPanel = lazy(async () => ({
   default: (await import("../chat/ThreadRelationshipsControl")).ThreadRelationshipsPanel,
@@ -107,7 +128,7 @@ export function MinesCatalogTree({
   onActivateThread: (thread: ScopedThreadRef) => void;
   activeThreadKey: string | null;
 }) {
-  const { catalog, snapshot, error, accountId } = useMinesCatalog();
+  const { catalog, snapshot, error, accountId, flush } = useMinesCatalog();
   const projects = useProjects();
   const threads = useQuietThreadShells();
   const serverConfigs = useServerConfigs();
@@ -122,11 +143,33 @@ export function MinesCatalogTree({
   const router = useRouter();
   const newThread = useNewThreadHandler();
   const invitations = useContactInvitationCount();
-  const sharedGroupIds = new Set(
-    useContactGroups().map((group) =>
+  const contactsSnapshot = useContactGroupsSnapshot();
+  const workgroups = contactsSnapshot?.groups ?? [];
+  const joinedWorkgroupKeys = contactsSnapshot
+    ? new Set(workgroups.map((group) => group.key))
+    : null;
+  const legacyWorkgroupIds = new Set([
+    ...workgroups.map((group) =>
       catalogHostId("group", group.coordinatorEnvironmentId, group.groupId),
     ),
-  );
+    ...snapshot.entities.flatMap((entity) =>
+      catalogWorkgroupKey(entity.id) !== null && entity.hostRef
+        ? [catalogHostId("group", entity.hostRef.environmentId, entity.hostRef.entityId)]
+        : [],
+    ),
+  ]);
+  const [mode, setMode] = useState<"personal" | "workgroups">("personal");
+  const [archiveTarget, setArchiveTarget] = useState<{
+    id: string;
+    title: string;
+    accountId: string;
+  } | null>(null);
+  const [restoringSection, setRestoringSection] = useState<string | null>(null);
+  const liveEnvironments = useAtomValue(liveShellEnvironmentIdsAtom);
+  const archiveMine = useOrchestrationCommand(threadEnvironment.archive, { reportFailure: false });
+  const restoreMine = useOrchestrationCommand(threadEnvironment.unarchive, {
+    reportFailure: false,
+  });
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [editor, setEditor] = useState<{ id: string | null; title: string } | null>(null);
@@ -154,6 +197,28 @@ export function MinesCatalogTree({
       !hiddenProjects.has(entity.id) && (entity.kind === "section" || entity.kind === "project"),
   );
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!catalog) return;
+    catalog.transaction(() => {
+      for (const group of contactsSnapshot?.groups ?? []) {
+        catalog.upsert({
+          id: catalogWorkgroupId(group.key),
+          kind: "group",
+          title: group.groupName,
+          hostRef: { environmentId: group.coordinatorEnvironmentId, entityId: group.groupId },
+        });
+        const pins = snapshot.pins;
+        const legacyId = catalogHostId("group", group.coordinatorEnvironmentId, group.groupId);
+        const legacyIndex = pins.findIndex((entry) => entry.entity.id === legacyId);
+        if (legacyIndex >= 0) {
+          if (!pins.some((entry) => entry.entity.id === catalogWorkgroupId(group.key)))
+            catalog.pin(catalogWorkgroupId(group.key), pins[legacyIndex + 1]?.entity.id);
+          catalog.unpin(legacyId);
+        }
+      }
+    });
+  }, [catalog, contactsSnapshot, snapshot.pins]);
 
   useEffect(() => {
     if (!catalog) return;
@@ -216,6 +281,12 @@ export function MinesCatalogTree({
       </p>
     );
 
+  const assertCurrentAccount = () => {
+    if ((appAtomRegistry.get(minesAccountIdAtom) ?? "local-device") !== accountId)
+      throw new Error(
+        "The active account changed. Return to the original account to restore this section.",
+      );
+  };
   const run = (action: () => void) => {
     try {
       action();
@@ -243,11 +314,21 @@ export function MinesCatalogTree({
       });
   };
   const visible = (entry: MinesCatalogEntry, pinned = false) => {
-    if (hiddenProjects.has(entry.entity.id) || sharedGroupIds.has(entry.entity.id)) return false;
+    if (hiddenProjects.has(entry.entity.id) || legacyWorkgroupIds.has(entry.entity.id))
+      return false;
+    const workgroupKey = catalogWorkgroupKey(entry.entity.id);
+    if (
+      workgroupKey !== null &&
+      joinedWorkgroupKeys !== null &&
+      !joinedWorkgroupKeys.has(workgroupKey)
+    )
+      return false;
     return isCatalogLibraryEntryVisible({
       entity: entry.entity,
       thread: threadById.get(entry.entity.id),
       pinned,
+      mode,
+      primaryEnvironmentId,
     });
   };
   const renderRows = (
@@ -255,8 +336,9 @@ export function MinesCatalogTree({
     pinned = false,
     path = "library",
     parentId: string | null = null,
+    withinPins = false,
   ) => {
-    const visibleEntries = entries.filter((entry) => visible(entry, pinned));
+    const visibleEntries = entries.filter((entry) => visible(entry, pinned || withinPins));
     const listKey = pinned ? "pins" : (entries[0]?.parentId ?? "root");
     const count = visibleCounts[listKey] ?? 100;
     return (
@@ -316,6 +398,11 @@ export function MinesCatalogTree({
                   entity.hostRef.entityId as ThreadId,
                 ),
               );
+            const workgroupKey = catalogWorkgroupKey(entity.id);
+            if (workgroupKey !== null) {
+              void router.navigate({ to: "/shared-groups", search: { group: workgroupKey } });
+              return;
+            }
             if (entity.kind === "group" && entity.hostRef)
               void router.navigate({
                 to: "/$environmentId/groups/$groupId",
@@ -452,11 +539,16 @@ export function MinesCatalogTree({
                         <MenuSeparator />
                         <MenuItem onClick={() => setEditor({ id: entity.id, title: entity.title })}>
                           <PencilIcon />
-                          Rename section
+                          Rename
                         </MenuItem>
-                        <MenuItem onClick={() => run(() => catalog.removeContainer(entity.id))}>
+                        <MenuItem
+                          variant="destructive"
+                          onClick={() =>
+                            setArchiveTarget({ id: entity.id, title: entity.title, accountId })
+                          }
+                        >
                           <Trash2Icon />
-                          Remove section, keep contents
+                          Archive
                         </MenuItem>
                       </>
                     ) : null}
@@ -575,7 +667,7 @@ export function MinesCatalogTree({
               </CatalogRowMenu>
               {container && open ? (
                 <ul>
-                  {renderRows(entry.children, false, key, entity.id)}
+                  {renderRows(entry.children, false, key, entity.id, withinPins || pinned)}
                   {container && entry.children.length === 0 ? (
                     <li>
                       <CatalogDropArea
@@ -643,13 +735,19 @@ export function MinesCatalogTree({
           />
         ))}
         <div className="flex items-center justify-between px-2 py-2">
-          <span className="text-xs font-medium text-muted-foreground">Your library</span>
+          <span className="text-xs font-medium text-muted-foreground">
+            {mode === "workgroups" ? "Workgroups" : "Your library"}
+          </span>
           <div className="flex items-center gap-1">
             <Button
               size="icon-xs"
               variant="ghost-muted"
-              aria-label="Shared groups"
-              onClick={() => void router.navigate({ to: "/shared-groups" })}
+              aria-label="Workgroups"
+              aria-pressed={mode === "workgroups"}
+              data-pressed={mode === "workgroups" ? "" : undefined}
+              onClick={() =>
+                setMode((current) => (current === "personal" ? "workgroups" : "personal"))
+              }
             >
               <UsersIcon />
               {invitations > 0 ? (
@@ -663,10 +761,67 @@ export function MinesCatalogTree({
               size="icon-xs"
               variant="ghost-muted"
               aria-label="New section"
+              hidden={mode === "workgroups"}
               onClick={() => setEditor({ id: null, title: "" })}
             >
               <PlusIcon />
             </Button>
+            <Menu>
+              <MenuTrigger
+                aria-label="Library options"
+                render={<Button size="icon-xs" variant="ghost-muted" />}
+              >
+                <MoreHorizontalIcon />
+              </MenuTrigger>
+              <MenuPopup>
+                <MenuSub>
+                  <MenuSubTrigger>Archived sections</MenuSubTrigger>
+                  <MenuSubPopup>
+                    {catalog.getArchivedSections().length === 0 ? (
+                      <MenuItem disabled>No archived sections</MenuItem>
+                    ) : (
+                      catalog.getArchivedSections().map((section) => (
+                        <MenuItem
+                          key={section.id}
+                          disabled={restoringSection !== null}
+                          onClick={() => {
+                            setRestoringSection(section.id);
+                            void restoreCatalogSection({
+                              catalog,
+                              flush,
+                              sectionId: section.id,
+                              unarchive: async (ref) => {
+                                assertCurrentAccount();
+                                const environmentId = EnvironmentId.make(ref.environmentId);
+                                const result = await restoreMine({
+                                  environmentId,
+                                  input: { threadId: ThreadId.make(ref.threadId) },
+                                });
+                                if (result._tag === "Failure")
+                                  throw squashAtomCommandFailure(result);
+                                refreshArchivedThreadsForEnvironment(environmentId);
+                              },
+                            })
+                              .then(
+                                () => setActionError(null),
+                                (cause: unknown) =>
+                                  setActionError(
+                                    cause instanceof Error
+                                      ? cause.message
+                                      : "The section could not be restored.",
+                                  ),
+                              )
+                              .finally(() => setRestoringSection(null));
+                          }}
+                        >
+                          Restore {section.title}
+                        </MenuItem>
+                      ))
+                    )}
+                  </MenuSubPopup>
+                </MenuSub>
+              </MenuPopup>
+            </Menu>
           </div>
         </div>
         {error ? (
@@ -687,7 +842,7 @@ export function MinesCatalogTree({
           <ul aria-label="Pinned items">{renderRows(snapshot.pins, true, "pins")}</ul>
           {snapshot.pins.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted-foreground/65">
-              Pin a mine, project, section, or device.
+              Pin a mine, workgroup, project, section, or device.
             </p>
           ) : null}
         </CatalogDropArea>
@@ -698,13 +853,20 @@ export function MinesCatalogTree({
           label="Library"
           className="min-h-8"
         >
-          <ul aria-label="Library">{renderRows(snapshot.roots)}</ul>
+          <ul aria-label={mode === "workgroups" ? "Workgroups" : "Library"}>
+            {renderRows(mode === "workgroups" ? catalogWorkgroupEntries(snapshot) : snapshot.roots)}
+          </ul>
+          {mode === "workgroups" &&
+          catalogWorkgroupEntries(snapshot).filter((entry) => visible(entry)).length === 0 ? (
+            <p className="px-3 py-2 text-xs text-muted-foreground">No workgroups yet.</p>
+          ) : null}
         </CatalogDropArea>
         {discoveryEnvironmentIds.map((environmentId) => (
           <CatalogGroups
             key={environmentId}
             environmentId={environmentId}
             catalog={catalog}
+            visible={mode === "personal"}
             deviceName={
               environments.find((environment) => environment.environmentId === environmentId)
                 ?.label ?? "Computer"
@@ -722,7 +884,7 @@ export function MinesCatalogTree({
         >
           <DialogPopup>
             <DialogHeader>
-              <DialogTitle>{editor?.id ? "Rename section" : "New section"}</DialogTitle>
+              <DialogTitle>{editor?.id ? "Rename" : "New section"}</DialogTitle>
             </DialogHeader>
             <form
               onSubmit={(event) => {
@@ -760,6 +922,66 @@ export function MinesCatalogTree({
             </form>
           </DialogPopup>
         </Dialog>
+        {archiveTarget?.accountId === accountId ? (
+          <CatalogSectionArchiveDialog
+            key={`${accountId}:${archiveTarget.id}`}
+            title={archiveTarget.title}
+            onClose={() => setArchiveTarget(null)}
+            onArchive={async (includeContents) => {
+              if (!includeContents) {
+                catalog.archiveSection(archiveTarget.id, { includeContents: false });
+                await flush();
+                return;
+              }
+              const contents = catalog.getSectionContents(archiveTarget.id);
+              const hosts = new Set(
+                contents.flatMap((entity) =>
+                  entity.hostRef ? [entity.hostRef.environmentId] : [],
+                ),
+              );
+              if ([...hosts].some((id) => !liveEnvironments.has(EnvironmentId.make(id))))
+                throw new Error(
+                  "Connect each related device and let its mines finish loading before archiving this section.",
+                );
+              const refs = relatedSectionThreads(contents, threads);
+              const keys = new Set(refs.map((ref) => `${ref.environmentId}:${ref.threadId}`));
+              if (
+                threads.some(
+                  (thread) =>
+                    keys.has(`${thread.environmentId}:${thread.id}`) &&
+                    !threadRuntimeCanArchive(thread.runtime),
+                )
+              )
+                throw new Error("Stop the active mines in this section before archiving them.");
+              await archiveCatalogSection({
+                catalog,
+                flush,
+                sectionId: archiveTarget.id,
+                threads: refs,
+                archive: async (ref) => {
+                  assertCurrentAccount();
+                  const environmentId = EnvironmentId.make(ref.environmentId);
+                  const result = await archiveMine({
+                    environmentId,
+                    input: { threadId: ThreadId.make(ref.threadId) },
+                  });
+                  if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                  refreshArchivedThreadsForEnvironment(environmentId);
+                },
+                unarchive: async (ref) => {
+                  assertCurrentAccount();
+                  const environmentId = EnvironmentId.make(ref.environmentId);
+                  const result = await restoreMine({
+                    environmentId,
+                    input: { threadId: ThreadId.make(ref.threadId) },
+                  });
+                  if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                  refreshArchivedThreadsForEnvironment(environmentId);
+                },
+              });
+            }}
+          />
+        ) : null}
         {agentsFor?.accountId === accountId ? (
           <Dialog
             open
@@ -808,7 +1030,9 @@ function CatalogGroups({
   environmentId,
   catalog,
   deviceName,
+  visible,
 }: {
+  visible: boolean;
   environmentId: EnvironmentId;
   catalog: MinesCatalog;
   deviceName: string;
@@ -830,6 +1054,7 @@ function CatalogGroups({
       }
     });
   }, [catalog, environmentId, groups.data]);
+  if (!visible) return null;
   const archived =
     groups.data?.groups.filter(
       (group) => group.archivedAt !== null && group.visibility !== "shared",

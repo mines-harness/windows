@@ -161,6 +161,11 @@ Open **Pull requests** to review changes and comments, request reviewers, check 
 or merge. You can edit review titles and descriptions and your own comments where the host allows it.
 GitLab calls these merge requests.
 
+For a fork with several remotes, the list follows the remote tracked by the
+project's current branch. An explicit GitHub default repository takes precedence
+when it matches a configured remote. Keeping an upstream remote for syncing does
+not by itself add that upstream's reviews to a branch tracking your own fork.
+
 On mobile, **Pull requests** lists reviews across your connected environments. Open a review
 to read its description, activity, commits, and changed files. Line comments stay as drafts
 until you submit the review. **Work on PR** opens a mine with the review attached; sending

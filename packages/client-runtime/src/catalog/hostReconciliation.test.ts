@@ -124,3 +124,53 @@ it("keeps unknown project grouping, scratch roots and catalog tombstones", () =>
   });
   expect(scratch.getSnapshot().roots.map((entry) => entry.entity.id)).toEqual([threadId("root")]);
 });
+
+it("preserves archived imported metadata and manual subagent placements during host refresh", () => {
+  const catalog = new MinesCatalog();
+  catalog.upsert({ id: "manual", kind: "section", title: "Manual" });
+  const sourceProject = { id: "/workspace/mines", title: "Source mines" };
+  const importSource = { executionProjectId: "execution", sourceProject, agentName: "Scout" };
+  catalog.upsert(
+    {
+      id: projectId,
+      kind: "project",
+      title: "Source project",
+      importSource,
+      hostRef: { environmentId: "env", entityId: "execution" },
+    },
+    { parentId: "manual" },
+  );
+  catalog.upsert(
+    {
+      id: threadId("root"),
+      kind: "thread",
+      title: "Source root",
+      importSource,
+      hostRef: { environmentId: "env", entityId: "root" },
+    },
+    { parentId: projectId },
+  );
+  catalog.upsert(
+    {
+      id: threadId("child"),
+      kind: "thread",
+      title: "Manually placed agent",
+      importSource,
+      hostRef: { environmentId: "env", entityId: "child" },
+    },
+    { parentId: "manual" },
+  );
+  catalog.pin(threadId("root"));
+  catalog.setContextInstructions(projectId, "Keep these project instructions");
+  const before = catalog.getSnapshot();
+  catalog.archiveSection("manual", { includeContents: true });
+  const child = {
+    ...thread("child"),
+    lineage: { parentThreadId: "root", relationshipToParent: "subagent" as const },
+  };
+  reconcile(catalog, [thread("root"), child]);
+  catalog.restoreSection("manual");
+  expect(catalog.getSnapshot().roots).toEqual(before.roots);
+  expect(catalog.getSnapshot().pins).toEqual(before.pins);
+  expect(catalog.getSnapshot().contexts).toEqual(before.contexts);
+});
