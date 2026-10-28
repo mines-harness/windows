@@ -1,43 +1,38 @@
-# mines
+<p align="center"><img src="https://raw.githubusercontent.com/mines-harness/macos/main/assets/mines/icon-256.png" width="96" height="96" alt="Mines" /></p>
 
-An AI workspace for continuing useful work across your computers and phones. Mines builds on [t3code at `375da0f`](https://github.com/pingdotgg/t3code/tree/375da0fb9a20dfdbd2eb2db99050341fc30f3a23), retaining its Electron desktop, React Native companions, native provider adapters, and durable orchestration.
+<h1 align="center">mines for Windows</h1>
 
-The interface uses a true-black canvas, restrained motion, and original mine/flag icons. Minesweeper tiles are not part of the interface.
+<p align="center">Your coding agents. Your subscriptions. Your computers.</p>
 
-## Develop locally
+Mines is a workspace for coding agents across desktop, web, command-line hosts, and mobile companions. This repository preserves earlier Windows platform work. **Active Windows, macOS, Linux, and CLI development and releases use the [shared monorepo](https://github.com/mines-harness/macos).** Platform differences are recorded by its [source parity report](https://github.com/mines-harness/macos/actions/workflows/mines-source-parity.yml); this snapshot is not a separate release train.
 
-Use the versions pinned in `package.json` (Node 26.12.1 and pnpm 12.14.0).
+Windows and macOS use the same Electron and React application. Native integration, installer identity, signing, executable archives, terminal support, and system permissions require platform-specific validation. A successful macOS release does not certify a Windows binary; compare the release's source revision and validation before upgrading.
 
-```sh
-pnpm install
-pnpm dev --home-dir /absolute/path/to/mines-dev
-```
+## Shared desktop interface
 
-The dev runner prints a local pairing URL. `pnpm dev:desktop` starts the Electron application. Mobile development lives in `apps/mobile`; the WebRTC module requires a native development build, not Expo Go. App identifiers, data directories, account configuration, icons, and distribution feeds are isolated from upstream.
+![Mines web composer](https://raw.githubusercontent.com/mines-harness/macos/main/assets/showcase/web-composer.png)
 
-Configure a dedicated Clerk application and your own device service using `.env.example`. Local work remains useful before phone setup. No upstream Clerk application, relay, telemetry destination, or release feed is enabled by default. Updates stay disabled until an explicit mines release source is configured.
+Web development capture of the shared interface with an example unsent draft. This image is not a Windows package validation.
 
-## Workspace
+## Develop
 
-- Library hierarchy: optional sections, projects, conversations and groups, with independent ordered pins and an encrypted Yjs catalog.
-- Drag mines, projects and sections to arrange the Library or add a shortcut to Pinned. Projects and sections have custom instructions and device-specific context files/folders; section instructions apply before project instructions. Organizing a mine never moves its files or changes its execution computer.
-- Adjacent model and device selectors, multi-model workflows, existing-mine groups, explicit mentions and bounded delegation.
-- Isolated provider profiles and fresh-evidence quota recovery. Automatic switching is gated by the adapter's supported account policy; current unverified subscription integrations remain manual.
-- Resumable, read-only history imports with provenance and explicit coverage reports.
-- Codex Cloud and Claude Cloud as subscription-backed devices, with verified native CLI controls and provider links for unavailable operations.
-- Direct WebRTC phone/computer connections, authenticated device approval, encrypted caches, recent-first history, gzip, range loading, and resumable live subscriptions.
-
-The OVH service handles identity, presence and signaling. It does not relay or queue conversations. Restrictive networks can prevent direct access: switch networks or use cached content. See the [device-service deployment guide](infra/mines-control/README.md), [remote access](docs/user/remote-access.md), and [implementation and release gates](docs/mines/STATUS.md).
-
-## Validation and release
+Use the Node and pnpm versions pinned in the canonical monorepo.
 
 ```sh
-pnpm check:changed 375da0fb9a20dfdbd2eb2db99050341fc30f3a23
-pnpm icons:check
+git clone https://github.com/mines-harness/macos.git mines
+cd mines
+pnpm install --frozen-lockfile
+pnpm dev:desktop
 ```
 
-Physical iOS/Android networking, live subscription integrations, signing/notarization, update delivery, accessibility and performance acceptance remain release gates. Local tests and fixtures do not certify those gates. This checkout is a development implementation, not a published or signed beta.
+Read the [development guide](docs/operations/development.md) and [unified release procedure](https://github.com/mines-harness/macos/blob/main/docs/operations/mines-release.md) before packaging. Keep development state separate from an installed app's data directory.
 
-## License and attribution
+## Across devices
 
-The upstream MIT license and copyright notices are retained in [LICENSE](LICENSE), alongside third-party notices. Internal workspace package names and compatibility command paths still use `@t3tools`/`t3`; these are not claims of affiliation. Original mines icon assets live in `assets/mines`.
+Run agents through their native provider tools, organize mines and projects in the Library, and connect from approved devices. Provider capabilities depend on the runtime and account connected to the host. Direct WebRTC access depends on the network and an awake host.
+
+[Shared source and docs](https://github.com/mines-harness/macos) · [Unified releases](https://github.com/mines-harness/macos/releases) · [Android](https://github.com/mines-harness/android) · [iOS](https://github.com/mines-harness/ios)
+
+## License
+
+Built on [T3 Code](https://github.com/pingdotgg/t3code). The original [MIT license](LICENSE) and third-party notices are retained. Mines is independently maintained.

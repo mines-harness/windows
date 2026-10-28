@@ -1,3 +1,7 @@
+# Canonical Mines source and releases
+
+Active shared development and all new desktop/CLI releases use https://github.com/mines-harness/macos. This repository retains an earlier platform or distribution snapshot. Before implementing "latest", compare canonical main, this checkout, the installed app commit, and the canonical source parity report. Preserve platform-specific behavior when integrating changes; do not overwrite histories or run a second release train from this snapshot. Follow https://github.com/mines-harness/macos/blob/main/docs/operations/mines-release.md for verified builds and identity-preserving installation.
+
 # mines
 
 mines is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
