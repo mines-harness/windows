@@ -10,9 +10,7 @@ Windows and macOS use the same Electron and React application. Native integratio
 
 ## Shared desktop interface
 
-![Mines web composer](https://raw.githubusercontent.com/mines-harness/macos/main/assets/showcase/web-composer.png)
-
-Web development capture of the shared interface with an example unsent draft. This image is not a Windows package validation.
+Windows uses the shared Mines renderer. Read the [canonical source](https://github.com/mines-harness/macos) for the current interface and the release notes for platform validation.
 
 ## Develop
 
